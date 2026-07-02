@@ -1,0 +1,735 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Task = void 0;
+exports.isBlocked = isBlocked;
+const Settings_1 = require("../Config/Settings");
+const GlobalFilter_1 = require("../Config/GlobalFilter");
+const StatusRegistry_1 = require("../Statuses/StatusRegistry");
+const DateTools_1 = require("../DateTime/DateTools");
+const TasksDate_1 = require("../DateTime/TasksDate");
+const StatusConfiguration_1 = require("../Statuses/StatusConfiguration");
+const PriorityTools_1 = require("../lib/PriorityTools");
+const logging_1 = require("../lib/logging");
+const LogTasksHelper_1 = require("../lib/LogTasksHelper");
+const DateFallback_1 = require("../DateTime/DateFallback");
+const ListItem_1 = require("./ListItem");
+const Urgency_1 = require("./Urgency");
+const TaskRegularExpressions_1 = require("./TaskRegularExpressions");
+const OnCompletion_1 = require("./OnCompletion");
+/**
+ * Task encapsulates the properties of the MarkDown task along with
+ * the extensions provided by this plugin. This is used to parse and
+ * generate the markdown task for all updates and replacements.
+ *
+ * @class Task
+ */
+class Task extends ListItem_1.ListItem {
+    /**
+     * Constructs a Task from the provided fields.
+     *
+     * Note: The `args` parameter keeps a reference to the original object passed to the constructor.
+     * This is necessary to recover private date fields when spreading a Task object.
+     *
+     * When spreading a Task (`new Task({ ...task, id: newId })`), the public getters (createdDate, etc.)
+     * are not copied, but the private fields (_createdDate, etc.) are included in the object.
+     * We use the `args` reference to access those private fields if the public date parameters are undefined.
+     */
+    constructor(args) {
+        const { status, description, taskLocation, indentation, listMarker, priority, createdDate, startDate, scheduledDate, dueDate, doneDate, cancelledDate, recurrence, onCompletion, dependsOn, id, blockLink, tags, originalMarkdown, scheduledDateIsInferred, parent, } = args;
+        super({
+            originalMarkdown,
+            indentation,
+            listMarker,
+            statusCharacter: status.symbol,
+            description,
+            taskLocation,
+            parent: parent ?? null,
+        });
+        this._urgency = null;
+        // NEW_TASK_FIELD_EDIT_REQUIRED
+        this.status = status;
+        this.tags = tags;
+        this.priority = priority;
+        this._createdDate = this.resolveDate(createdDate, args._createdDate);
+        this._startDate = this.resolveDate(startDate, args._startDate);
+        this._scheduledDate = this.resolveDate(scheduledDate, args._scheduledDate);
+        this._dueDate = this.resolveDate(dueDate, args._dueDate);
+        this._doneDate = this.resolveDate(doneDate, args._doneDate);
+        this._cancelledDate = this.resolveDate(cancelledDate, args._cancelledDate);
+        this.recurrence = recurrence;
+        this.onCompletion = onCompletion;
+        this.dependsOn = dependsOn;
+        this.id = id;
+        this.blockLink = blockLink;
+        this.scheduledDateIsInferred = scheduledDateIsInferred;
+    }
+    /**
+     * Resolve a date field when spreading a Task object.
+     *
+     * When a Task is spread (`new Task({ ...task, ... })`), date field getters are not copied
+     * (getters aren't own properties), but the private field values are included in the spread object.
+     *
+     * This helper prioritizes explicitly passed parameters over recovered private field values:
+     * - If the parameter is explicitly provided (even null), use it
+     * - Otherwise, use the recovered private field value
+     * - If both are undefined, default to null
+     *
+     * @param paramValue - The date parameter explicitly passed to the constructor
+     * @param recoveredValue - The private field value recovered from the spread object
+     * @returns The resolved date value, or null if neither value exists
+     */
+    resolveDate(paramValue, recoveredValue) {
+        const parameterSupplied = paramValue !== undefined;
+        if (parameterSupplied) {
+            return paramValue;
+        }
+        else {
+            return recoveredValue ?? null;
+        }
+    }
+    /**
+     * Takes the given line from an Obsidian note and returns a Task object.
+     * Will check if Global Filter is present in the line.
+     *
+     * If you want to specify a parent ListItem or Task after a fromLine call,
+     * you have to do the following:
+     * @example
+     *  const finalTask = new Task({ ...firstReadTask!, parent: parentListItem });
+     *
+     * @static
+     * @param {string} line - The full line in the note to parse.
+     * @param {TaskLocation} taskLocation - The location of the task line
+     * @param {(Moment | null)} fallbackDate - The date to use as the scheduled date if no other date is set
+     * @return {*}  {(Task | null)}
+     * @see parseTaskSignifiers
+     * @see ListItem.fromListItemLine
+     */
+    static fromLine({ line, taskLocation, fallbackDate, }) {
+        const taskComponents = Task.extractTaskComponents(line);
+        // Check the line to see if it is a markdown task.
+        if (taskComponents === null) {
+            return null;
+        }
+        // return if the line does not have the global filter. Do this before
+        // any other processing to improve performance.
+        if (!GlobalFilter_1.GlobalFilter.getInstance().includedIn(taskComponents.body)) {
+            return null;
+        }
+        return Task.parseTaskSignifiers(line, taskLocation, fallbackDate);
+    }
+    /**
+     * Parses the line in attempt to get the task details.
+     *
+     * This reads the task even if the Global Filter is missing.
+     * If a Global Filter check is needed, use {@link Task.fromLine}.
+     *
+     * Task is returned regardless if Global Filter is present or not.
+     * However, if it is, it will be removed from the tags.
+     *
+     * @param line - the full line to parse
+     * @param taskLocation - The location of the task line
+     * @param fallbackDate - The date to use as the scheduled date if no other date is set
+     * @returns {*} {(Task | null)}
+     * @see fromLine
+     */
+    static parseTaskSignifiers(line, taskLocation, fallbackDate) {
+        const taskComponents = Task.extractTaskComponents(line);
+        // Check the line to see if it is a markdown task.
+        if (taskComponents === null) {
+            return null;
+        }
+        const { taskSerializer } = (0, Settings_1.getUserSelectedTaskFormat)();
+        const taskInfo = taskSerializer.deserialize(taskComponents.body);
+        let scheduledDateIsInferred = false;
+        // Infer the scheduled date from the file name if not set explicitly
+        if (DateFallback_1.DateFallback.canApplyFallback(taskInfo) && fallbackDate !== null) {
+            taskInfo.scheduledDate = fallbackDate;
+            scheduledDateIsInferred = true;
+        }
+        // Ensure that whitespace is removed around tags
+        taskInfo.tags = taskInfo.tags.map((tag) => tag.trim());
+        // Remove the Global Filter if it is there
+        taskInfo.tags = taskInfo.tags.filter((tag) => !GlobalFilter_1.GlobalFilter.getInstance().equals(tag));
+        return new Task({
+            ...taskComponents,
+            ...taskInfo,
+            taskLocation: taskLocation,
+            originalMarkdown: line,
+            scheduledDateIsInferred,
+        });
+    }
+    /**
+     * Extract the component parts of the task line.
+     * @param line
+     * @returns a {@link TaskComponents} object containing the component parts of the task line
+     */
+    static extractTaskComponents(line) {
+        // Check the line to see if it is a markdown task.
+        const regexMatch = line.match(TaskRegularExpressions_1.TaskRegularExpressions.taskRegex);
+        if (regexMatch === null) {
+            return null;
+        }
+        const indentation = regexMatch[1];
+        const listMarker = regexMatch[2];
+        // Get the status of the task.
+        const statusString = regexMatch[3];
+        const status = StatusRegistry_1.StatusRegistry.getInstance().bySymbolOrCreate(statusString);
+        // match[4] includes the whole body of the task after the brackets.
+        let body = regexMatch[4].trim();
+        // Match for block link and remove if found. Always expected to be
+        // at the end of the line.
+        const blockLinkMatch = body.match(TaskRegularExpressions_1.TaskRegularExpressions.blockLinkRegex);
+        const blockLink = blockLinkMatch !== null ? blockLinkMatch[0] : '';
+        if (blockLink !== '') {
+            body = body.replace(TaskRegularExpressions_1.TaskRegularExpressions.blockLinkRegex, '').trim();
+        }
+        return { indentation, listMarker, status, body, blockLink };
+    }
+    /**
+     * Flatten the task as a string that includes all its components.
+     *
+     * @note Output depends on {@link Settings.taskFormat}
+     * @return {*}  {string}
+     */
+    toString() {
+        return (0, Settings_1.getUserSelectedTaskFormat)().taskSerializer.serialize(this);
+    }
+    /**
+     * Returns the Task as a list item with a checkbox.
+     *
+     * @note Output depends on {@link Settings.taskFormat}
+     * @return {*}  {string}
+     */
+    toFileLineString() {
+        return `${this.indentation}${this.listMarker} [${this.status.symbol}] ${this.toString()}`;
+    }
+    /**
+     * Toggles this task and returns the resulting task(s).
+     *
+     * Use this method if you need to know which is the original (completed)
+     * task and which is the new recurrence.
+     *
+     * If the task is not recurring, it will return `[toggled]`.
+     *
+     * Toggling can result in more than one returned task in the case of
+     * recurrence. In this case, the toggled task will be returned
+     * together with the next occurrence in the order `[next, toggled]`.
+     *
+     * There is a possibility to use user set order `[next, toggled]`
+     * or `[toggled, next]` - {@link toggleWithRecurrenceInUsersOrder}.
+     *
+     */
+    toggle() {
+        const logger = logging_1.logging.getLogger('tasks.Task');
+        const codeLocation = 'toggle()';
+        (0, LogTasksHelper_1.logStartOfTaskEdit)(logger, codeLocation, this);
+        const newStatus = StatusRegistry_1.StatusRegistry.getInstance().getNextStatusOrCreate(this.status);
+        const newTasks = this.handleNewStatus(newStatus);
+        (0, LogTasksHelper_1.logEndOfTaskEdit)(logger, codeLocation, newTasks);
+        return newTasks;
+    }
+    /**
+     * Edits the {@link status} of this task and returns the resulting task(s).
+     *
+     * Use this method if you need to know which is the original (edited)
+     * task and which is the new recurrence, if any.
+     *
+     * If the task is not recurring, it will return `[edited]`,
+     * or `[this]` if the status is unchanged.
+     *
+     * Editing the status can result in more than one returned task in the case of
+     * recurrence. In this case, the edited task will be returned
+     * together with the next occurrence in the order `[next, edited]`.
+     *
+     * There is a possibility to use user set order `[next, edited]`
+     * or `[toggled, next]` - {@link handleNewStatusWithRecurrenceInUsersOrder}.
+     *
+     * @param newStatus
+     * @param today - Optional date representing the completion date. This defaults to today.
+     *                It is used for any new done date, and for the calculation of new
+     *                dates on recurring tasks that are marked as 'when done'.
+     *                However, any created date on a new recurrence is, for now, calculated from the
+     *                actual current date, rather than this parameter.
+     */
+    handleNewStatus(newStatus, today = window.moment()) {
+        if (newStatus.identicalTo(this.status)) {
+            // There is no need to create a new Task object if the new status behaviour is identical to the current one.
+            return [this];
+        }
+        const { setDoneDate } = (0, Settings_1.getSettings)();
+        const newDoneDate = this.newDate(newStatus, StatusConfiguration_1.StatusType.DONE, this.doneDate, setDoneDate, today);
+        const { setCancelledDate } = (0, Settings_1.getSettings)();
+        const newCancelledDate = this.newDate(newStatus, StatusConfiguration_1.StatusType.CANCELLED, this.cancelledDate, setCancelledDate, today);
+        const toggledTask = new Task({
+            ...this,
+            status: newStatus,
+            doneDate: newDoneDate,
+            cancelledDate: newCancelledDate,
+        });
+        const newStatusIsNotDone = !newStatus.isCompleted();
+        const oldStatusWasDone = this.status.isCompleted();
+        const noRecurrenceRule = this.recurrence === null;
+        const noNewRecurrence = newStatusIsNotDone || oldStatusWasDone || noRecurrenceRule;
+        if (noNewRecurrence) {
+            return [toggledTask];
+        }
+        const nextOccurrence = this.recurrence.next(today);
+        if (nextOccurrence === null) {
+            return [toggledTask];
+        }
+        const nextTask = this.createNextOccurrence(newStatus, nextOccurrence);
+        // Write next occurrence before previous occurrence.
+        return [nextTask, toggledTask];
+    }
+    /**
+     * Returns the new value to use for a date that tracks progress on tasks upon transition to a different
+     * {@link StatusType}.
+     *
+     * Currently, this is used to calculate the new Done Date or Cancelled Date,
+     */
+    newDate(newStatus, statusType, oldDate, dateEnabledInSettings, today) {
+        let newDate = null;
+        if (newStatus.type === statusType) {
+            if (this.status.type !== statusType) {
+                // Set date only if setting value is true.
+                if (dateEnabledInSettings) {
+                    newDate = today;
+                }
+            }
+            else {
+                // This task was already in statusType, so preserve its existing date.
+                newDate = oldDate;
+            }
+        }
+        return newDate;
+    }
+    createNextOccurrence(newStatus, nextOccurrence) {
+        const { setCreatedDate } = (0, Settings_1.getSettings)();
+        let createdDate = null;
+        if (setCreatedDate) {
+            createdDate = window.moment();
+        }
+        // In case the task being toggled was previously cancelled, ensure the new task has no cancelled date:
+        const cancelledDate = null;
+        // Also set the new done date to zero, to simplify the
+        // saving of edited tasks in the Edit Task modal:
+        const doneDate = null;
+        const statusRegistry = StatusRegistry_1.StatusRegistry.getInstance();
+        const nextStatus = statusRegistry.getNextRecurrenceStatusOrCreate(newStatus);
+        return new Task({
+            ...this,
+            ...nextOccurrence,
+            status: nextStatus,
+            // New occurrences cannot have the same block link.
+            // And random block links don't help.
+            blockLink: '',
+            // New occurrences also cannot have the same dependency fields. See #2654.
+            id: '',
+            dependsOn: [],
+            // add new createdDate on recurring tasks
+            createdDate,
+            cancelledDate,
+            doneDate,
+        });
+    }
+    /**
+     * Toggles this task and returns the resulting task(s).
+     *
+     * Use this method if the updated task(s) are to be saved,
+     * as this honours the user setting to control the order
+     * the tasks should be saved in.
+     *
+     * If the task is not recurring, it will return `[toggled]`.
+     *
+     * Toggling can result in more than one returned task in the case of
+     * recurrence. In this case, the toggled task will be returned in
+     * user set order `[next, toggled]` or `[toggled, next]` depending
+     * on {@link Settings}.
+     *
+     * If there is no need to consider user settings call {@link toggle}.
+     *
+     */
+    toggleWithRecurrenceInUsersOrder() {
+        const newTasks = this.toggle();
+        return this.putRecurrenceInUsersOrder(newTasks);
+    }
+    handleNewStatusWithRecurrenceInUsersOrder(newStatus, today = window.moment()) {
+        const logger = logging_1.logging.getLogger('tasks.Task');
+        logger.debug(`changed task ${this.taskLocation.path} ${this.taskLocation.lineNumber} ${this.originalMarkdown} status to '${newStatus.symbol}'`);
+        const newTasks = this.handleNewStatus(newStatus, today);
+        return this.putRecurrenceInUsersOrder(newTasks);
+    }
+    putRecurrenceInUsersOrder(newTasks) {
+        const potentiallyPrunedTasks = (0, OnCompletion_1.handleOnCompletion)(this, newTasks);
+        const { recurrenceOnNextLine } = (0, Settings_1.getSettings)();
+        return recurrenceOnNextLine ? potentiallyPrunedTasks.reverse() : potentiallyPrunedTasks;
+    }
+    /**
+     * Return whether this object is a {@link Task}.
+     *
+     * This is useful at run-time to discover whether a {@link ListItem} reference is in fact a {@link Task}.
+     */
+    get isTask() {
+        return true;
+    }
+    /**
+     * Return whether the task is considered done.
+     * @returns true if the status type is {@link StatusType.DONE}, {@link StatusType.CANCELLED} or {@link StatusType.NON_TASK}, and false otherwise.
+     */
+    get isDone() {
+        return (this.status.type === StatusConfiguration_1.StatusType.DONE ||
+            this.status.type === StatusConfiguration_1.StatusType.CANCELLED ||
+            this.status.type === StatusConfiguration_1.StatusType.NON_TASK);
+    }
+    /**
+     * A task is treated as blocked if it depends on any existing task ids on tasks that are TODO or IN_PROGRESS.
+     *
+     * 'Done' tasks (with status DONE, CANCELLED or NON_TASK) are never blocked.
+     * Only direct dependencies are considered.
+     * @param allTasks - all the tasks in the vault. In custom queries, this is available via query.allTasks.
+     */
+    isBlocked(allTasks) {
+        if (this.dependsOn.length === 0) {
+            return false;
+        }
+        if (this.isDone) {
+            return false;
+        }
+        for (const depId of this.dependsOn) {
+            const depTask = allTasks.find((task) => task.id === depId && !task.isDone);
+            if (!depTask) {
+                // There is no not-done task with this id.
+                continue;
+            }
+            // We found a not-done task that this depends on, meaning this one is blocked:
+            return true;
+        }
+        return false;
+    }
+    /**
+     * A Task is blocking if there is any other not-done task dependsOn value with its id.
+     *
+     * 'Done' tasks (with status DONE, CANCELLED or NON_TASK) are never blocking.
+     * Only direct dependencies are considered.
+     * @param allTasks - all the tasks in the vault. In custom queries, this is available via query.allTasks.
+     */
+    isBlocking(allTasks) {
+        if (this.id === '') {
+            return false;
+        }
+        if (this.isDone) {
+            return false;
+        }
+        return allTasks.some((task) => {
+            if (task.isDone) {
+                return false;
+            }
+            return task.dependsOn.includes(this.id);
+        });
+    }
+    /**
+     * Return the number of the Task's priority.
+     *     - Highest = 0
+     *     - High = 1
+     *     - Medium = 2
+     *     - None = 3
+     *     - Low = 4
+     *     - Lowest = 5
+     * @see priorityName
+     */
+    get priorityNumber() {
+        return Number.parseInt(this.priority);
+    }
+    /**
+     * Returns the text to be used to represent the {@link priority} in group headings.
+     *
+     * Hidden text is used to sort the priorities in decreasing order, from
+     * {@link Priority.Highest} to {@link Priority.Lowest}.
+     */
+    get priorityNameGroupText() {
+        const priorityName = PriorityTools_1.PriorityTools.priorityNameUsingNormal(this.priority);
+        // Text inside the %%..%% comments is used to control the sort order.
+        // The comments are hidden by Obsidian when the headings are rendered.
+        return `%%${this.priority}%%${priorityName} priority`;
+    }
+    /**
+     * Return a copy of the description, with any tags removed.
+     *
+     * Note that this removes tags recognised by Tasks (including removing #123, for example),
+     * as opposed to tags recognised by Obsidian, which does not treat numbers-only as valid tags.
+     */
+    get descriptionWithoutTags() {
+        return this.description.replace(TaskRegularExpressions_1.TaskRegularExpressions.hashTags, '').trim();
+    }
+    /**
+     * Return the name of the Task's priority.
+     *
+     * Note that the default priority is called 'Normal', not 'None'.
+     @see priorityNumber
+     */
+    get priorityName() {
+        return PriorityTools_1.PriorityTools.priorityNameUsingNormal(this.priority);
+    }
+    get urgency() {
+        if (this._urgency === null) {
+            this._urgency = Urgency_1.Urgency.calculate(this);
+        }
+        return this._urgency;
+    }
+    get cancelledDate() {
+        return this._cancelledDate?.clone() ?? null;
+    }
+    /**
+     * Return {@link cancelledDate} as a {@link TasksDate}, so the field names in scripting docs are consistent with the existing search instruction names, and null values are easy to deal with.
+     */
+    get cancelled() {
+        return new TasksDate_1.TasksDate(this.cancelledDate);
+    }
+    get createdDate() {
+        return this._createdDate?.clone() ?? null;
+    }
+    /**
+     * Return {@link createdDate} as a {@link TasksDate}, so the field names in scripting docs are consistent with the existing search instruction names, and null values are easy to deal with.
+     */
+    get created() {
+        return new TasksDate_1.TasksDate(this.createdDate);
+    }
+    get doneDate() {
+        return this._doneDate?.clone() ?? null;
+    }
+    /**
+     * Return {@link doneDate} as a {@link TasksDate}, so the field names in scripting docs are consistent with the existing search instruction names, and null values are easy to deal with.
+     */
+    get done() {
+        return new TasksDate_1.TasksDate(this.doneDate);
+    }
+    get dueDate() {
+        return this._dueDate?.clone() ?? null;
+    }
+    /**
+     * Return {@link dueDate} as a {@link TasksDate}, so the field names in scripting docs are consistent with the existing search instruction names, and null values are easy to deal with.
+     */
+    get due() {
+        return new TasksDate_1.TasksDate(this.dueDate);
+    }
+    get scheduledDate() {
+        return this._scheduledDate?.clone() ?? null;
+    }
+    /**
+     * Return {@link scheduledDate} as a {@link TasksDate}, so the field names in scripting docs are consistent with the existing search instruction names, and null values are easy to deal with.
+     */
+    get scheduled() {
+        return new TasksDate_1.TasksDate(this.scheduledDate);
+    }
+    get startDate() {
+        return this._startDate?.clone() ?? null;
+    }
+    /**
+     * Return {@link startDate} as a {@link TasksDate}, so the field names in scripting docs are consistent with the existing search instruction names, and null values are easy to deal with.
+     */
+    get start() {
+        return new TasksDate_1.TasksDate(this.startDate);
+    }
+    /**
+     * Return the date fields that contribute to 'happens' searches.
+     *
+     * @see happens
+     * @see {@link HappensDateField}
+     */
+    get happensDates() {
+        return Array.of(this.startDate, this.scheduledDate, this.dueDate);
+    }
+    /**
+     * Return the earliest of the dates used by 'happens' in this given task as a {@link TasksDate}.
+     *
+     * Generally speaking, the earliest date is considered to be the highest priority,
+     * as it is the first point at which the user might wish to act on the task.
+     *
+     * Invalid dates are ignored.
+     *
+     * @see happensDates
+     * @see {@link HappensDateField}
+     */
+    get happens() {
+        const happensDates = this.happensDates;
+        // Array.from() creates a copy of the array, to stop SonarLint
+        // complaining about sort() mutating the original.
+        // The preferred solution would to use toSorted(), but that is not currently available
+        // in the project configuration, without changing the compiler options, which seems
+        // a step too far in the middle of a bug-fix branch.
+        // https://stackoverflow.com/questions/76593892/how-to-use-tosorted-method-in-typescript
+        const sortedHappensDates = Array.from(happensDates).sort(DateTools_1.compareByDate);
+        // Return the first non-null, valid date:
+        for (const date of sortedHappensDates) {
+            if (date?.isValid()) {
+                return new TasksDate_1.TasksDate(date);
+            }
+        }
+        return new TasksDate_1.TasksDate(null);
+    }
+    /**
+     * Return true if the Task has a valid recurrence rule, and false otherwise,
+     * that is, false if it does not have a recurrence rule, or the recurrence rule is invalid.
+     */
+    get isRecurring() {
+        return this.recurrence !== null;
+    }
+    /**
+     * Return the text of the Task's recurrence rule, if it is supplied and is valid,
+     * and an empty string otherwise.
+     */
+    get recurrenceRule() {
+        return this.recurrence ? this.recurrence.toText() : '';
+    }
+    get heading() {
+        return this.precedingHeader;
+    }
+    get hasHeading() {
+        return this.precedingHeader !== null;
+    }
+    /**
+     * Returns the text that should be displayed to the user when linking to the origin of the task
+     *
+     * @param isFilenameUnique {boolean|null} Whether the name of the file that contains the task is unique in the vault.
+     *                                        If it is undefined, the outcome will be the same as with a unique file name: the file name only.
+     *                                        If set to `true`, the full path will be returned.
+     */
+    getLinkText({ isFilenameUnique }) {
+        let linkText;
+        if (isFilenameUnique) {
+            linkText = this.filename;
+        }
+        else {
+            // A slash at the beginning indicates this is a path, not a filename.
+            linkText = '/' + this.path;
+        }
+        if (linkText === null) {
+            return null;
+        }
+        // Otherwise, this wouldn't provide additional information and only take up space.
+        if (this.precedingHeader !== null && this.precedingHeader !== linkText) {
+            linkText = linkText + ' > ' + this.precedingHeader;
+        }
+        return linkText;
+    }
+    /**
+     * Compare all the fields in another Task, to detect any differences from this one.
+     *
+     * If any field is different in any way, it will return false.
+     *
+     * This is used in some optimisations, to avoid work if an edit to file
+     * does not change any tasks, so it is vital that its definition
+     * of identical is very strict.
+     *
+     * @param other
+     */
+    identicalTo(other) {
+        // First compare child Task and ListItem objects, and any other data in ListItem:
+        if (!super.identicalTo(other)) {
+            return false;
+        }
+        // NEW_TASK_FIELD_EDIT_REQUIRED
+        // Based on ideas from koala. AquaCat and javalent in Discord:
+        // https://discord.com/channels/686053708261228577/840286264964022302/996735200388186182
+        // and later.
+        //
+        // Note: sectionStart changes every time a line is added or deleted before
+        //       any of the tasks in a file. This does mean that redrawing of tasks blocks
+        //       happens more often than is ideal.
+        let args = [
+            'priority',
+            'blockLink',
+            'scheduledDateIsInferred',
+            'id',
+            'dependsOn',
+            'onCompletion',
+        ];
+        for (const el of args) {
+            if (this[el]?.toString() !== other[el]?.toString())
+                return false;
+        }
+        if (!this.status.identicalTo(other.status)) {
+            return false;
+        }
+        // Compare tags
+        if (this.tags.length !== other.tags.length) {
+            return false;
+        }
+        // Tags are the same only if the values are in the same order
+        if (!this.tags.every(function (element, index) {
+            return element === other.tags[index];
+        })) {
+            return false;
+        }
+        // Compare Date fields
+        args = Task.allDateFields();
+        for (const el of args) {
+            const date1 = this[el];
+            const date2 = other[el];
+            if ((0, DateTools_1.compareByDate)(date1, date2) !== 0) {
+                return false;
+            }
+        }
+        if (!this.recurrenceIdenticalTo(other)) {
+            return false;
+        }
+        return this.file.rawFrontmatterIdenticalTo(other.file);
+    }
+    recurrenceIdenticalTo(other) {
+        const recurrence1 = this.recurrence;
+        const recurrence2 = other.recurrence;
+        if (recurrence1 === null && recurrence2 !== null) {
+            return false;
+        }
+        if (recurrence1 !== null && recurrence2 === null) {
+            return false;
+        }
+        if (recurrence1 && recurrence2 && !recurrence1.identicalTo(recurrence2)) {
+            return false;
+        }
+        return true;
+    }
+    /**
+     * See also {@link AllTaskDateFields}
+     */
+    static allDateFields() {
+        return ['createdDate', 'startDate', 'scheduledDate', 'dueDate', 'doneDate', 'cancelledDate'];
+    }
+    /**
+     * Returns an array of hashtags found in string
+     *
+     * @param description A task description that may contain hashtags
+     *
+     * @returns An array of hashTags found in the string
+     */
+    static extractHashtags(description) {
+        return description.match(TaskRegularExpressions_1.TaskRegularExpressions.hashTags)?.map((tag) => tag.trim()) ?? [];
+    }
+}
+exports.Task = Task;
+/**
+ * A task is treated as blocked if it depends on any existing task ids on tasks that are TODO or IN_PROGRESS.
+ *
+ * 'Done' tasks (with status DONE, CANCELLED or NON_TASK) are never blocked.
+ * @param thisTask
+ * @param allTasks
+ */
+function isBlocked(thisTask, allTasks) {
+    if (thisTask.dependsOn.length === 0) {
+        return false;
+    }
+    if (thisTask.isDone) {
+        return false;
+    }
+    for (const depId of thisTask.dependsOn) {
+        const depTask = allTasks.find((task) => task.id === depId && !task.isDone);
+        if (!depTask) {
+            // There is no not-done task with this id.
+            continue;
+        }
+        // We found a not-done task that this depends on, meaning this one is blocked:
+        return true;
+    }
+    return false;
+}
+//# sourceMappingURL=Task.js.map

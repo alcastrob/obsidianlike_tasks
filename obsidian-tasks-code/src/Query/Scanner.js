@@ -1,0 +1,115 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.continueLinesFlattened = continueLinesFlattened;
+exports.continueLines = continueLines;
+exports.splitSourceHonouringLineContinuations = splitSourceHonouringLineContinuations;
+const Statement_1 = require("./Statement");
+function endsWith1Slash(inputLine) {
+    return inputLine.endsWith('\\');
+}
+function endsWith2Slashes(inputLine) {
+    return inputLine.endsWith('\\\\');
+}
+function stripLeadingWhitespace(adjustedInputLine) {
+    return adjustedInputLine.replace(/^[ \t]*/, '');
+}
+function stripEndingSlashAndPrecedingWhitespace(adjustedInputLine) {
+    return adjustedInputLine.replace(/[ \t]*\\$/, '');
+}
+function adjustLine(inputLine, continuePreviousLine) {
+    let adjustedLine = inputLine;
+    if (continuePreviousLine) {
+        // The new line will be appended to the previous one,
+        // so discard any leading white space:
+        adjustedLine = stripLeadingWhitespace(inputLine);
+    }
+    if (endsWith2Slashes(adjustedLine)) {
+        // This has at least 2 backslashes at the end of the line,
+        // so convert '\\' to '\':
+        adjustedLine = adjustedLine.slice(0, -1);
+    }
+    else if (endsWith1Slash(inputLine)) {
+        // This is a continuation line, so remove its trailing backslash
+        // and any spare white space beforehand.
+        adjustedLine = stripEndingSlashAndPrecedingWhitespace(adjustedLine);
+    }
+    return adjustedLine;
+}
+/**
+ * Removes newlines escaped by a backslash.
+ * A trailing backslash at the end of a line can be escaped by doubling it.
+ *
+ * @param input input string
+ * @returns modified input, as a string
+ *
+ * @see continueLines
+ */
+function continueLinesFlattened(input) {
+    return continueLines(input)
+        .map((instruction) => instruction.anyContinuationLinesRemoved)
+        .join('\n');
+}
+/**
+ * Removes newlines escaped by a backslash.
+ * A trailing backslash at the end of a line can be escaped by doubling it.
+ *
+ * Instruction lines are not trimmed.
+ * But instructions that are empty or only contain whitespace are discarded.
+ *
+ * @param input input string
+ * @returns modified input, as a list of strings
+ *
+ * @see continueLinesFlattened
+ */
+function continueLines(input) {
+    const instructions = [];
+    let continuePreviousLine = false;
+    let currentStatementRaw = '';
+    let currentStatementProcessed = '';
+    // See https://github.com/obsidian-tasks-group/obsidian-tasks/issues/3137.
+    //      Issue #3137 revealed that if the last line of the query ended in
+    //      a backslash, this function returned without saved the final
+    //      instruction.
+    //      The simplest way to prevent this is to add an extra end-of-line
+    //      to the end of the query, which will get ignored when not needed:
+    const inputWithGuaranteedFinalEOL = input + '\n';
+    for (const inputLine of inputWithGuaranteedFinalEOL.split('\n')) {
+        const adjustedLine = adjustLine(inputLine, continuePreviousLine);
+        if (continuePreviousLine) {
+            currentStatementRaw += '\n' + inputLine;
+            currentStatementProcessed += ' ' + adjustedLine;
+        }
+        else {
+            currentStatementRaw = inputLine;
+            currentStatementProcessed = adjustedLine;
+        }
+        // Decide what to do with the next line:
+        if (endsWith2Slashes(inputLine)) {
+            continuePreviousLine = false;
+        }
+        else {
+            continuePreviousLine = endsWith1Slash(inputLine);
+        }
+        if (!continuePreviousLine) {
+            if (currentStatementProcessed.trim() !== '') {
+                instructions.push(new Statement_1.Statement(currentStatementRaw, currentStatementProcessed));
+            }
+            currentStatementRaw = '';
+            currentStatementProcessed = '';
+        }
+    }
+    return instructions;
+}
+/**
+ * Take an input string and split it into a list of statements.
+ *
+ * Generally this is similar to splitting the string into lines, but handles line
+ * continuations and escape sequences.
+ *
+ * @param input Input string
+ * @returns List of statements
+ */
+function splitSourceHonouringLineContinuations(input) {
+    return continueLines(input).map((instruction) => instruction.anyContinuationLinesRemoved);
+}
+//# sourceMappingURL=Scanner.js.map

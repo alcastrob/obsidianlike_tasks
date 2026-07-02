@@ -1,21 +1,25 @@
-# vscode-tasks
+# obsidianlike_tasks
 
 ## Qué es este repositorio
 
-Monorepo con dos proyectos:
+Contiene dos cosas:
 
-- **`obsidian-tasks-code/`** — código fuente del plugin [Obsidian Tasks](https://github.com/obsidian-tasks-group/obsidian-tasks) (subido como referencia/inspiración).
-- **`vscode-extension/`** — extensión de VS Code para gestión de tareas, estilo Obsidian Tasks. **Este es el proyecto activo.**
+- **La raíz del repo** (`package.json`, `tsconfig.json`, `src/`, ...) — extensión de VS Code para gestión de tareas, estilo Obsidian Tasks. **Este es el proyecto activo.**
+- **`obsidian-tasks-code/`** — código fuente del plugin [Obsidian Tasks](https://github.com/obsidian-tasks-group/obsidian-tasks) (subido como referencia/inspiración, no se compila ni se toca).
 
----
+**Nota histórica**: hasta hace poco los fuentes de la extensión vivían en una subcarpeta
+`vscode-extension/` (monorepo con dos proyectos hermanos). Esa subcarpeta se eliminó y su
+contenido se movió a la raíz del repo — el repo *es* la extensión ahora, con
+`obsidian-tasks-code/` como único hermano (referencia). Si algo en git history o en apuntes
+viejos menciona rutas `vscode-extension/...`, tradúcelas mentalmente a la raíz.
 
-## vscode-extension
+## La extensión
 
 ### Objetivo
 
 Extensión de VS Code llamada **"Obsidian-Like Tasks"** que permite crear, completar y eliminar tareas directamente desde el editor, sin salir al navegador ni a otra app. Inspirada en el plugin Tasks de Obsidian. El nombre evita confundirla con la funcionalidad nativa de VS Code "Tasks" (`tasks.json`, `Tasks: Run Build Task`, etc.) — por eso todos los comandos de esta extensión llevan el prefijo `Obsidian-Like Tasks:` en la Command Palette.
 
-**Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (la carpeta del repo sigue llamándose `vscode-extension/`, sin relación), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Vault Tool (`d:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `d:\git\obsidianlike\CLAUDE.md`.
+**Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (sin relación con el nombre de la carpeta del repo, `obsidianlike_tasks`), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Vault Tool (`d:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `d:\git\obsidianlike\CLAUDE.md`.
 
 ### Stack
 
@@ -28,10 +32,10 @@ Extensión de VS Code llamada **"Obsidian-Like Tasks"** que permite crear, compl
 ### Estructura de archivos
 
 ```
-vscode-extension/
+obsidianlike_tasks/            ← raíz del repo == raíz de la extensión
 ├── package.json              ← manifest (comandos, configuración)
 ├── README.md                 ← documentación de cara al usuario (qué hace, comandos, instalación)
-├── tsconfig.json             ← CommonJS, ES2020, outDir=out, esModuleInterop
+├── tsconfig.json             ← CommonJS, ES2020, outDir=out, rootDir=src, esModuleInterop
 ├── .vscodeignore
 ├── src/
 │   ├── extension.ts              ← activate()/deactivate(); activate() es async (espera al
@@ -44,7 +48,10 @@ vscode-extension/
 │   ├── commands/taskCommands.ts  ← toggle / crear-editar tarea vía QuickInput
 │   ├── api/TasksApi.ts           ← API pública exportada (consumida por Vault Tool)
 │   └── core/                     ← port fiel del motor de Obsidian Tasks (ver abajo)
-└── out/                      ← JS compilado (generado, no commitear)
+├── out/                      ← JS compilado (generado, no commitear)
+└── obsidian-tasks-code/      ← plugin original de Obsidian, solo como referencia — no se compila
+                                 (tsconfig.json tiene `"include": ["src/**/*"]` precisamente para
+                                 que tsc no intente compilar esto, ahora que es hermano de `src/`)
 ```
 
 Las tareas son líneas markdown reales (`- [ ] texto 📅 2024-01-01 ⏫ 🔁 every week`) en
@@ -194,7 +201,7 @@ npm run package   # compile + vsce package --allow-missing-repository → genera
 
 ```bash
 git clone <repo>
-cd vscode-tasks/vscode-extension
+cd obsidianlike_tasks
 
 # Si hay problemas de SSL corporativo:
 npm install --strict-ssl=false
@@ -202,13 +209,19 @@ npm install --strict-ssl=false
 npm run compile
 ```
 
-Para depurar: abrir `vscode-extension/` en VS Code y pulsar **F5** (lanza Extension Development Host).
+Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extension Development Host).
 
 ### Gotchas conocidos
 
 - **SSL corporativo**: `npm install` puede fallar con `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. Usar `--strict-ssl=false`.
 - **`@types/vscode` incompleto**: si solo aparece `package.json` sin `index.d.ts` en `node_modules/@types/vscode/`, el paquete se descargó a medias por el SSL. Borrar `node_modules/` y reinstalar con `--strict-ssl=false`.
 - **`tsconfig.json` usa `module: commonjs`**: cambiar a `Node16` rompe los imports relativos con `.js` que la API de VS Code no espera en extensiones.
+- **`tsconfig.json` necesita `"include": ["src/**/*"]` explícito**: desde que los fuentes viven en
+  la raíz del repo, `obsidian-tasks-code/` es hermano de `src/` (antes estaba fuera del árbol de
+  `vscode-extension/` y ni se veía). Sin `include`, el patrón por defecto `**/*` arrastra también
+  los `.ts` de `obsidian-tasks-code/`, que chocan con `rootDir: "src"` (`error TS6059: File ...
+  is not under 'rootDir'`). El síntoma es una pared de docenas de errores TS6059 apuntando a
+  ficheros de `obsidian-tasks-code/tests|src/...` que nunca deberían compilarse.
 - **`.vscodeignore` no debe excluir `node_modules/**`**: `vsce package` ya sabe incluir solo las
   `dependencies` reales (excluyendo `devDependencies` como `typescript`) — si además hay una
   línea `node_modules/**` en `.vscodeignore`, la pisa y las excluye TODAS, incluidas `moment`/

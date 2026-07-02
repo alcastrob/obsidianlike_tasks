@@ -1,0 +1,73 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const MockDataLoader_1 = require("../TestingTools/MockDataLoader");
+const SimulatedFile_1 = require("./SimulatedFile");
+describe('FileParser', () => {
+    it('should set all non-TasksFile data in TaskLocation', () => {
+        // This test exists to detect accidental changes to the task-reading code.
+        // I found that intentionally breaking the setting of _sectionIndex was
+        // not caught by any other tests.
+        // begin-snippet: readTasksFromSimulatedFile
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('multiple_headings');
+        // end-snippet
+        const locationDataExceptTasksFile = tasks.map((task) => task.taskLocation.allFieldsExceptTasksFileForTesting());
+        expect(locationDataExceptTasksFile).toMatchInlineSnapshot(`
+            [
+              {
+                "_lineNumber": 6,
+                "_precedingHeader": "Level 2 heading",
+                "_sectionIndex": 0,
+                "_sectionStart": 6,
+              },
+              {
+                "_lineNumber": 7,
+                "_precedingHeader": "Level 2 heading",
+                "_sectionIndex": 1,
+                "_sectionStart": 6,
+              },
+              {
+                "_lineNumber": 11,
+                "_precedingHeader": "Level 2 heading",
+                "_sectionIndex": 0,
+                "_sectionStart": 11,
+              },
+              {
+                "_lineNumber": 15,
+                "_precedingHeader": "Level 3 heading",
+                "_sectionIndex": 0,
+                "_sectionStart": 15,
+              },
+              {
+                "_lineNumber": 16,
+                "_precedingHeader": "Level 3 heading",
+                "_sectionIndex": 1,
+                "_sectionStart": 15,
+              },
+            ]
+        `);
+    });
+    it('does not read task lines beginning with a ZWSP - zero-width space', () => {
+        // Demo the behaviour of Obsidian when then Simple Tab Indent plugin indents what looks like a task line.
+        // https://github.com/hoomersinpsom/simple-tab-indent
+        const testDataName = 'zero_width';
+        const data = MockDataLoader_1.MockDataLoader.get(testDataName);
+        expect(data.fileContents).toContain("- [ ] #task Task line 1 in 'zero_width' - indented by tab character");
+        expect(data.fileContents).toContain("- [ ] #task Task line 2 in 'zero_width' - indented by ZWSP + tab character");
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)(testDataName);
+        expect(tasks.length).toEqual(1);
+        expect(tasks[0].description).toEqual("#task Task line 1 in 'zero_width' - indented by tab character");
+    });
+    it('readTasksFromSimulatedFile() should preserve file path', () => {
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('numbered_list_items_with_paren');
+        expect(tasks[0].path).toEqual('Test Data/numbered_list_items_with_paren.md');
+    });
+    it('readTasksFromSimulatedFile() should preserve metadata', () => {
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('yaml_custom_number_property');
+        expect(tasks[0].taskLocation.tasksFile.cachedMetadata.frontmatter).toMatchInlineSnapshot(`
+            {
+              "custom_number_prop": 42,
+            }
+        `);
+    });
+});
+//# sourceMappingURL=FileParser.test.js.map

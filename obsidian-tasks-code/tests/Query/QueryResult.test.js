@@ -1,0 +1,329 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+/**
+ * @jest-environment jsdom
+ */
+const moment_1 = __importDefault(require("moment/moment"));
+const DescriptionField_1 = require("../../src/Query/Filter/DescriptionField");
+const TagsField_1 = require("../../src/Query/Filter/TagsField");
+const TaskGroups_1 = require("../../src/Query/Group/TaskGroups");
+const Query_1 = require("../../src/Query/Query");
+const QueryResult_1 = require("../../src/Query/QueryResult");
+const SearchInfo_1 = require("../../src/Query/SearchInfo");
+const SimulatedFile_1 = require("../Obsidian/SimulatedFile");
+const RenderingTestHelpers_1 = require("../Renderer/RenderingTestHelpers");
+const TaskBuilder_1 = require("../TestingTools/TaskBuilder");
+const TestHelpers_1 = require("../TestingTools/TestHelpers");
+const MockDataHelpers_1 = require("../TestingTools/MockDataHelpers");
+const FunctionField_1 = require("../../src/Query/Filter/FunctionField");
+window.moment = moment_1.default;
+describe('QueryResult', () => {
+    function createUngroupedQueryResult(tasks) {
+        return createUngroupedQueryResultWithLimit(tasks, tasks.length);
+    }
+    function createUngroupedQueryResultWithLimit(tasks, totalTasksCountBeforeLimit) {
+        const groupers = [];
+        const groups = new TaskGroups_1.TaskGroups(groupers, tasks, SearchInfo_1.SearchInfo.fromAllTasks(tasks));
+        return new QueryResult_1.QueryResult(groups, totalTasksCountBeforeLimit, undefined);
+    }
+    it('should create a QueryResult from TaskGroups', () => {
+        // Arrange
+        const groupers = [];
+        const tasks = [];
+        const groups = new TaskGroups_1.TaskGroups(groupers, tasks, SearchInfo_1.SearchInfo.fromAllTasks(tasks));
+        // Act
+        const queryResult = new QueryResult_1.QueryResult(groups, 0, undefined);
+        // Assert
+        expect(queryResult.totalTasksCount).toEqual(0);
+        expect(queryResult.groups).toEqual(groups.groups);
+        expect(queryResult.searchErrorMessage).toBeUndefined();
+    });
+    it('should preserve search-time errors', () => {
+        const query = new Query_1.Query('sort by function task.linenumer');
+        expect(query.error).toBeUndefined();
+        const queryResult = query.applyQueryToTasks([
+            new TaskBuilder_1.TaskBuilder().description('first').build(),
+            new TaskBuilder_1.TaskBuilder().description('second').build(),
+        ]);
+        expect(queryResult.searchErrorMessage).toContain('Error: "undefined" is not a valid sort key: while evaluating instruction \'sort by function task.linenumer\'');
+        const { filter } = new DescriptionField_1.DescriptionField().createFilterOrErrorMessage('description includes anything');
+        expect(filter).toBeDefined();
+        const filteredResult = queryResult.applyFilter(filter);
+        expect(filteredResult.searchErrorMessage).toContain('Error: "undefined" is not a valid sort key: while evaluating instruction \'sort by function task.linenumer\'');
+    });
+    it('should preserve query file properties when filtering results', () => {
+        const queryFile = (0, MockDataHelpers_1.getTasksFileFromMockData)('docs_sample_for_task_properties_reference');
+        expect(queryFile.property('sample_date_and_time_property')).toEqual('2024-07-21T12:37:00');
+        // Based on the query in issue #3774
+        const query = new Query_1.Query('group by function query.file.property("sample_date_and_time_property") ?? "no date"', queryFile);
+        const getFirstGroupName = (result) => result.taskGroups.groups[0].groups[0];
+        // Do an initial search:
+        const queryResult = query.applyQueryToTasks([new TaskBuilder_1.TaskBuilder().build()]);
+        expect(getFirstGroupName(queryResult)).toEqual('2024-07-21T12:37:00');
+        // Simulate a user entering a search string in the Toolbar filter box:
+        const { filter } = new FunctionField_1.FunctionField().createFilterOrErrorMessage('filter by function true');
+        expect(filter).toBeDefined();
+        // Confirm that the properties in the query file are retained in the filtered results:
+        const filteredResult = queryResult.applyFilter(filter);
+        expect(getFirstGroupName(filteredResult)).toEqual('2024-07-21T12:37:00');
+    });
+    it('should be able to store an error message if the search fails', () => {
+        // Arrange, Act:
+        const message = 'I did not work';
+        const result = QueryResult_1.QueryResult.fromError(message);
+        // Assert
+        expect(result.searchErrorMessage).toEqual(message);
+        expect(result.taskGroups.totalTasksCount()).toEqual(0);
+    });
+    describe('Text representation of tasks count', () => {
+        const twoMoreComplicatedTasks = [
+            (0, TestHelpers_1.fromLine)({ line: '- [ ] Do something more complicated 1' }),
+            (0, TestHelpers_1.fromLine)({ line: '- [ ] Do something more complicated 2' }),
+        ];
+        // Simple cases - where no limit was applied
+        it('should pluralise "tasks" if 0 matches', () => {
+            const tasks = [];
+            const queryResult = createUngroupedQueryResult(tasks);
+            expect(queryResult.totalTasksCountDisplayText()).toEqual('0 tasks');
+            expect(queryResult.asMarkdown()).toEqual(`
+`);
+        });
+        it('should not pluralise "task" if only 1 match', () => {
+            const tasks = [(0, TestHelpers_1.fromLine)({ line: '- [ ] Do something' })];
+            const queryResult = createUngroupedQueryResult(tasks);
+            expect(queryResult.totalTasksCountDisplayText()).toEqual('1 task');
+        });
+        it('should pluralise "tasks" if 2 matches', () => {
+            const queryResult = createUngroupedQueryResult(twoMoreComplicatedTasks);
+            expect(queryResult.totalTasksCountDisplayText()).toEqual('2 tasks');
+            expect(queryResult.asMarkdown()).toEqual(`
+- [ ] Do something more complicated 1
+- [ ] Do something more complicated 2
+`);
+        });
+        // Cases where a limit was applied
+        it('should show original number of matching tasks if limit was applied', () => {
+            const tasks = [];
+            const queryResult = createUngroupedQueryResultWithLimit(tasks, 1);
+            expect(queryResult.totalTasksCountDisplayText()).toEqual('0 of 1 task');
+        });
+        it('should show original number of matching tasks if limit was applied', () => {
+            const tasks = [(0, TestHelpers_1.fromLine)({ line: '- [ ] Do something' })];
+            const queryResult = createUngroupedQueryResultWithLimit(tasks, 2);
+            expect(queryResult.totalTasksCountDisplayText()).toEqual('1 of 2 tasks');
+        });
+        it('should show original number of matching tasks if limit was applied', () => {
+            const queryResult = createUngroupedQueryResultWithLimit(twoMoreComplicatedTasks, 9);
+            expect(queryResult.totalTasksCountDisplayText()).toEqual('2 of 9 tasks');
+        });
+        it('should retain original number of matching tasks if filter applied after limit exceeded', () => {
+            // See issue #3724
+            const queryResult = createUngroupedQueryResultWithLimit(twoMoreComplicatedTasks, 9);
+            const filteredResult = queryResult.applyFilter(new DescriptionField_1.DescriptionField().createFilterOrErrorMessage('description includes some').filter);
+            expect(filteredResult.totalTasksCountDisplayText()).toEqual('2 of 9 tasks');
+        });
+    });
+});
+describe('Copying results', () => {
+    function searchTasksAndCopyResult(tasks, query) {
+        const queryResult = new Query_1.Query(query).applyQueryToTasks(tasks);
+        return queryResult.asMarkdown();
+    }
+    function searchMarkdownAndCopyResult(tasksMarkdown, query) {
+        const lines = tasksMarkdown.split('\n').filter((line) => line.length > 0);
+        const tasks = (0, TestHelpers_1.fromLines)({ lines });
+        return searchTasksAndCopyResult(tasks, query);
+    }
+    it('should copy one grouping level', () => {
+        const tasks = `
+- [ ] 4444
+- [ ] 333
+- [ ] 55555
+`;
+        const query = 'group by function task.description.length';
+        expect(searchMarkdownAndCopyResult(tasks, query)).toMatchInlineSnapshot(`
+            "
+            #### 3
+
+            - [ ] 333
+
+            #### 4
+
+            - [ ] 4444
+
+            #### 5
+
+            - [ ] 55555
+            "
+        `);
+    });
+    it('should copy four grouping levels', () => {
+        const tasks = `
+- [ ] 1 ⏳ 2025-10-29
+- [ ] 2 ⏬
+- [ ] 3 ⏫ ⏳ 2025-10-30
+- [ ] 4 ⏳ 2025-10-29
+- [ ] 5 #something
+- [ ] 6 🆔 id6
+`;
+        const query = `
+group by function task.tags.join(',')
+group by priority
+group by scheduled
+group by id
+`;
+        expect(searchMarkdownAndCopyResult(tasks, query)).toMatchInlineSnapshot(`
+            "
+            ##### %%1%%High priority
+
+            ###### 2025-10-30 Thursday
+
+            - [ ] 3 ⏫ ⏳ 2025-10-30
+
+            ##### %%3%%Normal priority
+
+            ###### 2025-10-29 Wednesday
+
+            - [ ] 1 ⏳ 2025-10-29
+            - [ ] 4 ⏳ 2025-10-29
+
+            ###### No scheduled date
+
+            ###### id6
+
+            - [ ] 6 🆔 id6
+
+            ##### %%5%%Lowest priority
+
+            ###### No scheduled date
+
+            - [ ] 2 ⏬
+
+            #### #something
+
+            ##### %%3%%Normal priority
+
+            ###### No scheduled date
+
+            - [ ] 5 #something
+            "
+        `);
+    });
+    it('should remove indentation for nested tasks', () => {
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('inheritance_2roots_listitem_listitem_task');
+        const query = '';
+        expect(searchTasksAndCopyResult(tasks, query)).toEqual(`
+- [ ] grandchild task 1
+- [ ] grandchild task 2
+`);
+    });
+    it.failing('should indent nested tasks', () => {
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('inheritance_1parent2children2grandchildren1sibling_start_with_heading');
+        const query = '';
+        expect(searchTasksAndCopyResult(tasks, query)).toEqual(`
+- [ ] #task parent task
+    - [ ] #task child task 1
+        - [ ] #task grandchild 1
+    - [ ] #task child task 2
+        - [ ] #task grandchild 2
+- [ ] #task sibling
+`);
+    });
+    it('should use hyphen as list marker', () => {
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('mixed_list_markers');
+        const query = '';
+        expect(searchTasksAndCopyResult(tasks, query)).toEqual(`
+- [ ] hyphen
+- [ ] asterisk
+- [ ] plus
+- [ ] numbered task with dot
+- [ ] numbered task with parenthesis
+`);
+    });
+    it('should remove callout prefixes', () => {
+        const tasks = (0, SimulatedFile_1.readTasksFromSimulatedFile)('callout_labelled');
+        const query = '';
+        expect(searchTasksAndCopyResult(tasks, query)).toEqual(`
+- [ ] #task Task in 'callout_labelled'
+- [ ] #task Task indented in 'callout_labelled'
+`);
+    });
+});
+describe('QueryResult - filters', () => {
+    const taskBuilder = new TaskBuilder_1.TaskBuilder();
+    const threeSimpleTasks = [
+        taskBuilder.description('task 1').build(),
+        taskBuilder.description('task 2').build(),
+        taskBuilder.description('task 3').build(),
+    ];
+    it('should filter an ungrouped flat list result', async () => {
+        const { markdown, rerenderWithFilter } = await (0, RenderingTestHelpers_1.renderMarkdown)('description does not include 3', threeSimpleTasks);
+        expect(markdown).toEqual(`
+- [ ] task 1
+- [ ] task 2
+`);
+        const filter = new DescriptionField_1.DescriptionField().createFilterOrErrorMessage('description includes 2');
+        const { filteredMarkdown } = await rerenderWithFilter(filter);
+        expect(filteredMarkdown).toEqual(`
+- [ ] task 2
+`);
+    });
+    it('should filter a grouped flat list result', async () => {
+        const { markdown, rerenderWithFilter } = await (0, RenderingTestHelpers_1.renderMarkdown)('group by function task.description', threeSimpleTasks);
+        expect(markdown).toEqual(`
+#### task 1
+
+- [ ] task 1
+
+#### task 2
+
+- [ ] task 2
+
+#### task 3
+
+- [ ] task 3
+`);
+        const filter = new DescriptionField_1.DescriptionField().createFilterOrErrorMessage('description includes 2');
+        const { filteredMarkdown } = await rerenderWithFilter(filter);
+        expect(filteredMarkdown).toEqual(`
+#### task 2
+
+- [ ] task 2
+`);
+    });
+    it('should filter a grouped flat list result with a task in multiple groups', async () => {
+        const taskBuilder = new TaskBuilder_1.TaskBuilder();
+        const task1 = taskBuilder.description('task 1').tags(['#one', '#two']).build();
+        const task2 = taskBuilder.description('task 2').tags(['#three']).build();
+        const tasks = [task1, task2];
+        const { markdown, rerenderWithFilter } = await (0, RenderingTestHelpers_1.renderMarkdown)('group by tags', tasks);
+        expect(markdown).toEqual(`
+#### #one
+
+- [ ] task 1 #one #two
+
+#### #three
+
+- [ ] task 2 #three
+
+#### #two
+
+- [ ] task 1 #one #two
+`);
+        const filter = new TagsField_1.TagsField().createFilterOrErrorMessage('tag includes two');
+        const { filteredMarkdown } = await rerenderWithFilter(filter);
+        expect(filteredMarkdown).toEqual(`
+#### #one
+
+- [ ] task 1 #one #two
+
+#### #two
+
+- [ ] task 1 #one #two
+`);
+    });
+});
+//# sourceMappingURL=QueryResult.test.js.map
