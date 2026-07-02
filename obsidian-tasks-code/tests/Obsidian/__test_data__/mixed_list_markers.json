@@ -1,0 +1,168 @@
+{
+  "cachedMetadata": {
+    "listItems": [
+      {
+        "parent": -1,
+        "position": {
+          "end": {
+            "col": 12,
+            "line": 0,
+            "offset": 12
+          },
+          "start": {
+            "col": 0,
+            "line": 0,
+            "offset": 0
+          }
+        },
+        "task": " "
+      },
+      {
+        "parent": -1,
+        "position": {
+          "end": {
+            "col": 14,
+            "line": 1,
+            "offset": 27
+          },
+          "start": {
+            "col": 0,
+            "line": 1,
+            "offset": 13
+          }
+        },
+        "task": " "
+      },
+      {
+        "parent": -2,
+        "position": {
+          "end": {
+            "col": 10,
+            "line": 2,
+            "offset": 38
+          },
+          "start": {
+            "col": 0,
+            "line": 2,
+            "offset": 28
+          }
+        },
+        "task": " "
+      },
+      {
+        "parent": -3,
+        "position": {
+          "end": {
+            "col": 29,
+            "line": 3,
+            "offset": 68
+          },
+          "start": {
+            "col": 0,
+            "line": 3,
+            "offset": 39
+          }
+        },
+        "task": " "
+      },
+      {
+        "parent": -4,
+        "position": {
+          "end": {
+            "col": 37,
+            "line": 4,
+            "offset": 106
+          },
+          "start": {
+            "col": 0,
+            "line": 4,
+            "offset": 69
+          }
+        },
+        "task": " "
+      }
+    ],
+    "sections": [
+      {
+        "position": {
+          "end": {
+            "col": 12,
+            "line": 0,
+            "offset": 12
+          },
+          "start": {
+            "col": 0,
+            "line": 0,
+            "offset": 0
+          }
+        },
+        "type": "list"
+      },
+      {
+        "position": {
+          "end": {
+            "col": 14,
+            "line": 1,
+            "offset": 27
+          },
+          "start": {
+            "col": 0,
+            "line": 1,
+            "offset": 13
+          }
+        },
+        "type": "list"
+      },
+      {
+        "position": {
+          "end": {
+            "col": 10,
+            "line": 2,
+            "offset": 38
+          },
+          "start": {
+            "col": 0,
+            "line": 2,
+            "offset": 28
+          }
+        },
+        "type": "list"
+      },
+      {
+        "position": {
+          "end": {
+            "col": 29,
+            "line": 3,
+            "offset": 68
+          },
+          "start": {
+            "col": 0,
+            "line": 3,
+            "offset": 39
+          }
+        },
+        "type": "list"
+      },
+      {
+        "position": {
+          "end": {
+            "col": 37,
+            "line": 4,
+            "offset": 106
+          },
+          "start": {
+            "col": 0,
+            "line": 4,
+            "offset": 69
+          }
+        },
+        "type": "list"
+      }
+    ]
+  },
+  "fileContents": "- [ ] hyphen\n* [ ] asterisk\n+ [ ] plus\n1. [ ] numbered task with dot\n1) [ ] numbered task with parenthesis\n",
+  "filePath": "Test Data/mixed_list_markers.md",
+  "getAllTags": [],
+  "parseFrontMatterTags": null,
+  "resolveLinkToPath": {}
+}

@@ -1,0 +1,59 @@
+{
+  "name": "obsidian-like-tasks",
+  "displayName": "Obsidian-like Tasks",
+  "description": "Manage markdown checkbox tasks a-la Obsidian Tasks, directly in VS Code",
+  "version": "0.1.0",
+  "publisher": "angelCastro",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "tasks",
+    "todo",
+    "productivity"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tasksManager.toggleTaskLine",
+        "title": "Obsidian-Like Tasks: Toggle Task Done"
+      },
+      {
+        "command": "tasksManager.createOrEditTask",
+        "title": "Obsidian-Like Tasks: Create or Edit Task"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "tasksManager.toggleTaskLine",
+        "key": "ctrl+enter",
+        "when": "editorTextFocus && editorLangId == markdown"
+      }
+    ],
+    "markdown": {
+      "markdownItPlugins": true
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile && vsce package --allow-missing-repository"
+  },
+  "dependencies": {
+    "chrono-node": "^2.9.1",
+    "moment": "^2.29.4",
+    "rrule": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  }
+}

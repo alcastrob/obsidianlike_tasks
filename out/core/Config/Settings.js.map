@@ -1,0 +1,1 @@
+{"version":3,"file":"Settings.js","sourceRoot":"","sources":["../../../src/core/Config/Settings.ts"],"names":[],"mappings":";;AAyBA,kCAEC;AAVD,MAAM,eAAe,GAAiB;IAClC,cAAc,EAAE,KAAK;IACrB,WAAW,EAAE,IAAI;IACjB,gBAAgB,EAAE,IAAI;IACtB,oBAAoB,EAAE,KAAK;IAC3B,+BAA+B,EAAE,KAAK;CACzC,CAAC;AAEF,SAAgB,WAAW;IACvB,OAAO,eAAe,CAAC;AAC3B,CAAC"}
