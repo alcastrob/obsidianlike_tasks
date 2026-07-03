@@ -42,6 +42,7 @@ const moment_1 = __importDefault(require("moment"));
 const Task_1 = require("../core/Task/Task");
 const TaskLocation_1 = require("../core/Task/TaskLocation");
 const Query_1 = require("../core/Query/Query");
+const taskCommands_1 = require("../commands/taskCommands");
 function toDto(task) {
     return {
         path: task.path,
@@ -110,6 +111,22 @@ function createTasksApi(getTaskIndex, onDidChangeTasks) {
             const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
             const edit = new vscode.WorkspaceEdit();
             edit.replace(uri, document.lineAt(line).range, replacementLines.join(eol));
+            await vscode.workspace.applyEdit(edit);
+        },
+        async editTaskAtLocation(path, line) {
+            const folder = vscode.workspace.workspaceFolders?.[0];
+            if (!folder) {
+                return;
+            }
+            const uri = vscode.Uri.joinPath(folder.uri, path);
+            const document = await vscode.workspace.openTextDocument(uri);
+            const lineText = document.lineAt(line).text;
+            const task = await (0, taskCommands_1.editTaskFromLineText)(lineText, new TaskLocation_1.TaskLocation(path, line));
+            if (!task) {
+                return;
+            }
+            const edit = new vscode.WorkspaceEdit();
+            edit.replace(uri, document.lineAt(line).range, task.toFileLineString());
             await vscode.workspace.applyEdit(edit);
         },
         onDidChangeTasks,

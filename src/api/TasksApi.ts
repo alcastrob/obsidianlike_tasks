@@ -3,6 +3,7 @@ import moment from 'moment';
 import { Task } from '../core/Task/Task';
 import { TaskLocation } from '../core/Task/TaskLocation';
 import { TasksQuery } from '../core/Query/Query';
+import { editTaskFromLineText } from '../commands/taskCommands';
 import type { TaskIndex } from '../TaskIndex';
 
 /** Plain, JSON-serialisable summary of a {@link Task}, for consumers outside this extension. */
@@ -35,10 +36,10 @@ export interface TasksQueryResultDTO {
  * Public API this extension exposes to other extensions via `activate()`'s return value
  * (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')?.exports`).
  *
- * This is the integration surface for Vault Tool (`angelCastro.vault-tool`): since two
- * extensions' webviews can't reach into each other, Vault Tool's *extension host* (not its
+ * This is the integration surface for Obsidian-like (`angelCastro.obsidian-like`): since two
+ * extensions' webviews can't reach into each other, Obsidian-like's *extension host* (not its
  * webview) calls this API instead of re-implementing the toggle/recurrence state machine or
- * the query language itself. Vault Tool should treat this as an optional soft dependency (check
+ * the query language itself. Obsidian-like should treat this as an optional soft dependency (check
  * `getExtension(...)` is defined before calling, and degrade gracefully if this extension isn't
  * installed) so it keeps working standalone.
  */
@@ -73,6 +74,26 @@ export interface TasksExtensionApi {
      * workspace folder is open.
      */
     toggleTaskAtLocation(path: string, line: number): Promise<void>;
+
+    /**
+     * Shows the "Create or edit Task" dialog for the task at `line` (0-based) in the file at
+     * `path` (workspace-relative), pre-filled from that line, and applies the result via
+     * `WorkspaceEdit` once the user clicks Apply (no-op if they cancel).
+     *
+     * This exists specifically for callers like Obsidian-like: this extension's own
+     * cursor-based `tasksManager.createOrEditTask` command has no way to know which line the
+     * user meant when the active tab is showing the file through *another* extension's custom
+     * editor (VS Code doesn't expose cursor position for those) — it falls back to appending a
+     * brand-new task instead, which is not what "edit this task" means. Obsidian-like's webview,
+     * on the other hand, always knows exactly which task the user clicked, the same way it
+     * already knows enough to call `toggleTaskAtLocation` — so it should call this instead of
+     * (or via) the command palette action when the user asks to edit a specific task.
+     *
+     * If the line isn't a recognised task, the dialog opens in "create" mode seeded with that
+     * line's text, mirroring this extension's own `createOrEditTaskOnLine`. No-op if the user
+     * cancels, or if no workspace folder is open.
+     */
+    editTaskAtLocation(path: string, line: number): Promise<void>;
 
     /**
      * Fires whenever any task anywhere in the workspace is added, removed, or edited (including
@@ -163,6 +184,25 @@ export function createTasksApi(
 
             const edit = new vscode.WorkspaceEdit();
             edit.replace(uri, document.lineAt(line).range, replacementLines.join(eol));
+            await vscode.workspace.applyEdit(edit);
+        },
+
+        async editTaskAtLocation(path: string, line: number): Promise<void> {
+            const folder = vscode.workspace.workspaceFolders?.[0];
+            if (!folder) {
+                return;
+            }
+
+            const uri = vscode.Uri.joinPath(folder.uri, path);
+            const document = await vscode.workspace.openTextDocument(uri);
+            const lineText = document.lineAt(line).text;
+            const task = await editTaskFromLineText(lineText, new TaskLocation(path, line));
+            if (!task) {
+                return;
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+            edit.replace(uri, document.lineAt(line).range, task.toFileLineString());
             await vscode.workspace.applyEdit(edit);
         },
 

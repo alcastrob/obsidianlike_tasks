@@ -24,7 +24,7 @@ let taskIndex: TaskIndex | undefined;
 // property — it does not preserve the getter. Since that spread happens before `taskIndex` is
 // assigned below, the getter always saw `taskIndex === undefined` and baked in a brand new, never
 // -fired, orphaned `EventEmitter`'s `.event` as a permanent dead end: every external subscriber
-// (e.g. Vault Tool) successfully "subscribed", just to an emitter nothing would ever fire.
+// (e.g. Obsidian-like) successfully "subscribed", just to an emitter nothing would ever fire.
 //
 // The fix: `onDidChangeTasks` must be a stable value that exists *before* the spread happens, not
 // a getter computed from `taskIndex` at spread-time. This emitter is that stable value — created
@@ -68,7 +68,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // open there is nothing to scan, so it's simply not created (not an error).
   //
   // The initial scan is awaited (not fire-and-forget) so that any consumer of this extension's
-  // API — e.g. Vault Tool's `getExtension(...).activate()` soft dependency — only ever sees a
+  // API — e.g. Obsidian-like's `getExtension(...).activate()` soft dependency — only ever sees a
   // fully-populated index. Otherwise a consumer that calls `renderTasksQuery()` (or subscribes
   // to `onDidChangeTasks`) immediately after activation can race the scan: it gets an empty
   // result before the scan finishes, and if it subscribes to `onDidChangeTasks` even a moment

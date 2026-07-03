@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toggleTaskAtCursor = toggleTaskAtCursor;
 exports.toggleTaskOnLine = toggleTaskOnLine;
 exports.createOrEditTaskAtCursor = createOrEditTaskAtCursor;
+exports.editTaskFromLineText = editTaskFromLineText;
 exports.createOrEditTaskOnLine = createOrEditTaskOnLine;
 const vscode = __importStar(require("vscode"));
 const Task_1 = require("../core/Task/Task");
@@ -43,19 +44,9 @@ const TaskLocation_1 = require("../core/Task/TaskLocation");
 const Status_1 = require("../core/Statuses/Status");
 const StatusRegistry_1 = require("../core/Statuses/StatusRegistry");
 const Priority_1 = require("../core/Task/Priority");
-const Recurrence_1 = require("../core/Task/Recurrence");
-const Occurrence_1 = require("../core/Task/Occurrence");
 const OnCompletion_1 = require("../core/Task/OnCompletion");
 const TaskRegularExpressions_1 = require("../core/Task/TaskRegularExpressions");
-const DateParsing_1 = require("../core/Query/DateParsing");
-const PRIORITY_OPTIONS = [
-    { label: '🔺 Highest', priority: Priority_1.Priority.Highest },
-    { label: '⏫ High', priority: Priority_1.Priority.High },
-    { label: '🔼 Medium', priority: Priority_1.Priority.Medium },
-    { label: 'Normal', priority: Priority_1.Priority.None },
-    { label: '🔽 Low', priority: Priority_1.Priority.Low },
-    { label: '⏬ Lowest', priority: Priority_1.Priority.Lowest },
-];
+const TaskEditWebview_1 = require("../TaskEditWebview");
 function relativePath(document) {
     return vscode.workspace.asRelativePath(document.uri, false);
 }
@@ -71,7 +62,7 @@ function getActiveMarkdownTabUri() {
 /**
  * Find the markdown document the user is currently looking at, whether it's open in VS Code's
  * native text editor (in which case a cursor position is also available) or in a custom editor
- * like Vault Tool's (in which case only the underlying document is reachable — `activeTextEditor`
+ * like Obsidian-like's (in which case only the underlying document is reachable — `activeTextEditor`
  * is `undefined` for those, since a custom editor's webview is not a `TextEditor`).
  */
 async function resolveActiveMarkdownTarget() {
@@ -92,7 +83,7 @@ async function resolveActiveMarkdownTarget() {
  * one, exactly as `Task.toggleWithRecurrenceInUsersOrder()` decides.
  *
  * Requires a known cursor line, so this only works when the file is open in VS Code's native
- * text editor — if it's open in a custom editor (Vault Tool), there is no cursor position to
+ * text editor — if it's open in a custom editor (Obsidian-like), there is no cursor position to
  * read, and the user should toggle the task from that editor's own UI instead.
  */
 async function toggleTaskAtCursor() {
@@ -119,14 +110,15 @@ async function toggleTaskOnLine(editor, line) {
     });
 }
 /**
- * Create a new task, or edit the task on the cursor's current line, through a sequence of
- * QuickInput steps. This mirrors the fields of Obsidian Tasks' 'Create or edit task' modal
- * (description, priority, dates, recurrence), using VS Code's native input widgets in place
- * of the original's custom Svelte modal.
+ * Create a new task, or edit the task on the cursor's current line, through the "Create or edit
+ * Task" webview dialog.
  *
- * When the active file is open in a custom editor (no known cursor line), this always creates
- * a new task appended at the end of the document rather than editing "the current line", since
- * there is no current line to edit.
+ * When the active file is open in a custom editor (no known cursor line — see
+ * {@link MarkdownTarget}), there is no "current line" to read a task from, so this always creates
+ * a new task appended at the end of the document instead. That fallback used to happen silently,
+ * which looked indistinguishable from "the dialog should have loaded my existing task but didn't"
+ * — the user has no way to tell the two apart just by looking at an empty dialog. Now it warns
+ * first, the same way {@link toggleTaskAtCursor} already does for the same underlying limitation.
  */
 async function createOrEditTaskAtCursor() {
     const target = await resolveActiveMarkdownTarget();
@@ -138,19 +130,31 @@ async function createOrEditTaskAtCursor() {
         await createOrEditTaskOnLine(target.editor, target.editor.selection.active.line);
         return;
     }
+    void vscode.window.showInformationMessage('Tasks: no hay una posición de cursor conocida (el archivo está abierto con un editor personalizado). Se creará una tarea nueva al final del documento — para editar una tarea existente, ábrela con "Open With → Text Editor" o usa el botón "Edit" de esa tarea si el editor personalizado lo ofrece.');
     await createTaskAppendedToDocument(target.document);
+}
+/**
+ * Parses `lineText` as a task (if it is one) and shows the "Create or edit Task" dialog seeded
+ * from it, returning the resulting {@link Task} or `undefined` if the user cancelled. Shared by
+ * every entry point that already has raw line text in hand — the cursor-based command, the
+ * CodeLens' explicit-line command, and {@link TasksApi.ts}'s `editTaskAtLocation` (which gets
+ * `(path, line)` from Obsidian-like instead of a `vscode.TextEditor`, so it doesn't have a
+ * `TaskLocation` computed via `relativePath()` the way the other two do — callers pass one in).
+ */
+async function editTaskFromLineText(lineText, taskLocation) {
+    const existing = Task_1.Task.fromLine({ line: lineText, taskLocation });
+    const nonTaskMatch = lineText.match(TaskRegularExpressions_1.TaskRegularExpressions.nonTaskRegex);
+    return promptForTaskFields(existing, taskLocation, {
+        seedDescription: existing?.description ?? nonTaskMatch?.[5]?.trim() ?? lineText.trim(),
+        seedIndentation: existing?.indentation ?? nonTaskMatch?.[1] ?? '',
+        seedListMarker: existing?.listMarker ?? nonTaskMatch?.[2] ?? '-',
+    });
 }
 /** Same as {@link createOrEditTaskAtCursor}, but for an explicit line — used by CodeLens actions. */
 async function createOrEditTaskOnLine(editor, line) {
     const lineText = editor.document.lineAt(line).text;
     const taskLocation = new TaskLocation_1.TaskLocation(relativePath(editor.document), line);
-    const existing = Task_1.Task.fromLine({ line: lineText, taskLocation });
-    const nonTaskMatch = lineText.match(TaskRegularExpressions_1.TaskRegularExpressions.nonTaskRegex);
-    const task = await promptForTaskFields(existing, taskLocation, {
-        seedDescription: existing?.description ?? nonTaskMatch?.[5]?.trim() ?? lineText.trim(),
-        seedIndentation: existing?.indentation ?? nonTaskMatch?.[1] ?? '',
-        seedListMarker: existing?.listMarker ?? nonTaskMatch?.[2] ?? '-',
-    });
+    const task = await editTaskFromLineText(lineText, taskLocation);
     if (!task) {
         return;
     }
@@ -177,97 +181,44 @@ async function createTaskAppendedToDocument(document) {
     await vscode.workspace.applyEdit(edit);
 }
 /**
- * Runs the description/priority/dates/recurrence QuickInput sequence and returns the resulting
- * {@link Task}, or `undefined` if the user cancelled at any step.
+ * Shows the "Create or edit Task" webview dialog and returns the resulting {@link Task}, or
+ * `undefined` if the user cancelled. All field validation (dates, recurrence) happens inside
+ * {@link showTaskEditDialog} itself, so the values here are already fully parsed.
  */
 async function promptForTaskFields(existing, taskLocation, seeds) {
-    const description = await vscode.window.showInputBox({
-        title: existing ? 'Edit task — description' : 'Create task — description',
-        value: seeds.seedDescription,
-        prompt: 'The task text, including any #tags',
-        validateInput: (v) => (v.trim() ? null : 'Description cannot be empty'),
-    });
-    if (description === undefined) {
+    const result = await (0, TaskEditWebview_1.showTaskEditDialog)({
+        description: seeds.seedDescription,
+        priority: existing?.priority ?? Priority_1.Priority.None,
+        recurrenceRuleText: existing?.recurrenceRule ?? '',
+        dueDateText: existing?.dueDate ? existing.dueDate.format(TaskRegularExpressions_1.TaskRegularExpressions.dateFormat) : '',
+        scheduledDateText: existing?.scheduledDate
+            ? existing.scheduledDate.format(TaskRegularExpressions_1.TaskRegularExpressions.dateFormat)
+            : '',
+        startDateText: existing?.startDate ? existing.startDate.format(TaskRegularExpressions_1.TaskRegularExpressions.dateFormat) : '',
+    }, existing !== null);
+    if (!result) {
         return undefined;
     }
-    const priorityPick = await vscode.window.showQuickPick(PRIORITY_OPTIONS.map((option) => ({
-        label: option.label,
-        picked: option.priority === (existing?.priority ?? Priority_1.Priority.None),
-    })), { title: 'Priority', placeHolder: 'Choose a priority (Esc for Normal)' });
-    const priority = PRIORITY_OPTIONS.find((option) => option.label === priorityPick?.label)?.priority ?? Priority_1.Priority.None;
-    const dueDateText = await vscode.window.showInputBox({
-        title: 'Due date',
-        value: existing?.dueDate ? existing.dueDate.format(TaskRegularExpressions_1.TaskRegularExpressions.dateFormat) : '',
-        prompt: "e.g. 2024-01-31, today, next monday — leave empty for none",
-        validateInput: (v) => (v.trim() === '' || (0, DateParsing_1.parseQueryDate)(v) !== null ? null : 'Could not understand that date'),
-    });
-    if (dueDateText === undefined) {
-        return undefined;
-    }
-    const scheduledDateText = await vscode.window.showInputBox({
-        title: 'Scheduled date',
-        value: existing?.scheduledDate ? existing.scheduledDate.format(TaskRegularExpressions_1.TaskRegularExpressions.dateFormat) : '',
-        prompt: 'When you plan to work on it — leave empty for none',
-        validateInput: (v) => (v.trim() === '' || (0, DateParsing_1.parseQueryDate)(v) !== null ? null : 'Could not understand that date'),
-    });
-    if (scheduledDateText === undefined) {
-        return undefined;
-    }
-    const startDateText = await vscode.window.showInputBox({
-        title: 'Start date',
-        value: existing?.startDate ? existing.startDate.format(TaskRegularExpressions_1.TaskRegularExpressions.dateFormat) : '',
-        prompt: "The earliest this task should be actioned — leave empty for none",
-        validateInput: (v) => (v.trim() === '' || (0, DateParsing_1.parseQueryDate)(v) !== null ? null : 'Could not understand that date'),
-    });
-    if (startDateText === undefined) {
-        return undefined;
-    }
-    const dueDate = dueDateText.trim() === '' ? null : (0, DateParsing_1.parseQueryDate)(dueDateText);
-    const scheduledDate = scheduledDateText.trim() === '' ? null : (0, DateParsing_1.parseQueryDate)(scheduledDateText);
-    const startDate = startDateText.trim() === '' ? null : (0, DateParsing_1.parseQueryDate)(startDateText);
-    const recurrenceText = await vscode.window.showInputBox({
-        title: 'Recurrence',
-        value: existing?.recurrenceRule ?? '',
-        prompt: "e.g. 'every week', 'every month on the 1st' — leave empty for a one-off task",
-        validateInput: (v) => {
-            if (v.trim() === '')
-                return null;
-            const recurrence = Recurrence_1.Recurrence.fromText({
-                recurrenceRuleText: v,
-                occurrence: new Occurrence_1.Occurrence({ startDate, scheduledDate, dueDate }),
-            });
-            return recurrence !== null ? null : 'Could not understand that recurrence rule';
-        },
-    });
-    if (recurrenceText === undefined) {
-        return undefined;
-    }
-    const recurrence = recurrenceText.trim() === ''
-        ? null
-        : Recurrence_1.Recurrence.fromText({
-            recurrenceRuleText: recurrenceText,
-            occurrence: new Occurrence_1.Occurrence({ startDate, scheduledDate, dueDate }),
-        });
     const status = existing?.status ?? StatusRegistry_1.StatusRegistry.getInstance().bySymbolOrCreate(Status_1.Status.TODO.symbol);
     return new Task_1.Task({
         status,
-        description,
+        description: result.description,
         taskLocation,
         indentation: seeds.seedIndentation,
         listMarker: seeds.seedListMarker,
-        priority,
+        priority: result.priority,
         createdDate: existing?.createdDate ?? null,
-        startDate,
-        scheduledDate,
-        dueDate,
+        startDate: result.startDate,
+        scheduledDate: result.scheduledDate,
+        dueDate: result.dueDate,
         doneDate: existing?.doneDate ?? null,
         cancelledDate: existing?.cancelledDate ?? null,
-        recurrence,
+        recurrence: result.recurrence,
         onCompletion: existing?.onCompletion ?? OnCompletion_1.OnCompletion.Ignore,
         dependsOn: existing?.dependsOn ?? [],
         id: existing?.id ?? '',
         blockLink: existing?.blockLink ?? '',
-        tags: Task_1.Task.extractHashtags(description),
+        tags: Task_1.Task.extractHashtags(result.description),
         originalMarkdown: '',
         scheduledDateIsInferred: false,
     });
