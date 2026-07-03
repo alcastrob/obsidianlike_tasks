@@ -19,7 +19,7 @@ viejos menciona rutas `vscode-extension/...`, tradúcelas mentalmente a la raíz
 
 Extensión de VS Code llamada **"Obsidian-Like Tasks"** que permite crear, completar y eliminar tareas directamente desde el editor, sin salir al navegador ni a otra app. Inspirada en el plugin Tasks de Obsidian. El nombre evita confundirla con la funcionalidad nativa de VS Code "Tasks" (`tasks.json`, `Tasks: Run Build Task`, etc.) — por eso todos los comandos de esta extensión llevan el prefijo `Obsidian-Like Tasks:` en la Command Palette.
 
-**Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (sin relación con el nombre de la carpeta del repo, `obsidianlike_tasks`), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Vault Tool (`d:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `d:\git\obsidianlike\CLAUDE.md`.
+**Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (sin relación con el nombre de la carpeta del repo, `obsidianlike_tasks`), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Obsidian-like (`d:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `d:\git\obsidianlike\CLAUDE.md`.
 
 ### Stack
 
@@ -44,9 +44,12 @@ obsidianlike_tasks/            ← raíz del repo == raíz de la extensión
 │   ├── TaskIndex.ts              ← escanea/vigila *.md del workspace, cachea Task[] parseadas
 │   ├── TaskCodeLensProvider.ts   ← CodeLens "Done/Edit" sobre cada línea de tarea
 │   ├── TaskDecorations.ts        ← tachado de completadas + resaltado de vencidas
-│   ├── markdownTasksPlugin.ts    ← markdown-it: renderiza bloques ```tasks``` en el Preview
-│   ├── commands/taskCommands.ts  ← toggle / crear-editar tarea vía QuickInput
-│   ├── api/TasksApi.ts           ← API pública exportada (consumida por Vault Tool)
+│   ├── markdownTasksPlugin.ts    ← markdown-it: renderiza bloques ```tasks``` + estiliza líneas
+│   │                                de checkbox sueltas (iconos de estado, tags) en el Preview
+│   ├── commands/taskCommands.ts  ← toggle / crear-editar tarea (delega el formulario en
+│   │                                TaskEditWebview.ts)
+│   ├── TaskEditWebview.ts        ← diálogo "Create or edit Task" (WebviewPanel), estilo Obsidian
+│   ├── api/TasksApi.ts           ← API pública exportada (consumida por Obsidian-like)
 │   └── core/                     ← port fiel del motor de Obsidian Tasks (ver abajo)
 ├── out/                      ← JS compilado (generado, no commitear)
 └── obsidian-tasks-code/      ← plugin original de Obsidian, solo como referencia — no se compila
@@ -105,12 +108,31 @@ IN_PROGRESS, DONE, CANCELLED, ON_HOLD, NON_TASK — statuses **personalizados** 
 como "Delegated" no tienen UI de configuración todavía, así que su `.type` seguirá siendo TODO a
 menos que se registren a mano), `<due|scheduled|start|done|created|cancelled> before/after/on
 <fecha>` (acepta tanto `start` como `starts`, igual que Obsidian), `no/has <campo> date`,
-`priority is [above|below] <nivel>`, `path includes/does not include`, `description
-includes/does not include`, **`description regex matches /patrón/flags`**, `tags include/do not
-include`, `no tags`, `heading includes`, `is [not] recurring`, y **`filter by function
-<expresión JS>`** (evalúa código arbitrario con `task` en scope — ver el aviso de seguridad en
+`happens before/after/on <fecha>` / `has/no happens date` (pseudo-campo que mira due, scheduled
+y start a la vez, igual que `HappensDateField` del original — útil para queries tipo `(happens
+before tomorrow) OR (no due date)`), `has/no depends on`, `has/no id`, `priority is
+[above|below] <nivel>`, `path includes/does not include`, `description includes/does not
+include`, **`description regex matches /patrón/flags`**, `tags include/do not include`, `no
+tags`, `heading includes`, `is [not] recurring`, y **`filter by function <expresión JS>`**
+(evalúa código arbitrario con `task` en scope — ver el aviso de seguridad en
 `ScriptingTaskView.ts`: es contenido del propio vault del usuario, no entrada externa, pero es
 ejecución de código real).
+
+`hide <campo>` / `show <campo>` se reconocen (contra la misma lista de nombres que el original:
+`id`, `depends on`, `priority`, fechas, `tags`, `backlink`, `edit button`, `postpone button`,
+`task count`, `toolbar`, `tree`, `urgency`, `on completion`, `recurrence rule`) pero son
+**no-op** — `markdownTasksPlugin.ts` renderiza siempre el mismo conjunto fijo de badges (prioridad,
+fecha de vencimiento, recurrencia, ruta) y no tiene todavía toggles por campo. El propósito de
+reconocerlas es solo no reportarlas como "línea no reconocida"; un nombre de campo inventado
+(`hide foobar`) sigue detectándose como tal.
+
+**Limitación conocida, no arreglada todavía**: el placeholder `{{query.file.path}}` (típico en
+`path does not include {{query.file.path}}` para excluir la nota que contiene la query) **no**
+se expande — se compara como texto literal, así que ese filtro nunca excluye nada y la query
+devuelve más resultados de los esperados, sin avisar con una línea no reconocida. Arreglarlo
+requiere pasar la ruta del fichero que contiene el bloque ` ```tasks ``` ` hasta `TasksQuery`
+(hoy ni `registerTasksCodeBlock` en `markdownTasksPlugin.ts` ni `renderTasksQuery` en
+`TasksApi.ts` la reciben) — pendiente.
 
 `sort by <campo> [reverse]` acepta múltiples líneas (se aplican en orden, como criterio de
 desempate). `group by <campo>` soporta los campos nombrados de siempre, y **`group by function
@@ -128,22 +150,92 @@ saldrán truncados — es fiel al comportamiento del plugin original, no un bug 
 | Feature | Dónde |
 |---|---|
 | **Toggle de tarea markdown bajo el cursor** (con recurrencia) | comando `tasksManager.toggleTaskLine` (`Ctrl+Enter` en markdown) |
-| **Crear/editar tarea markdown** (descripción, prioridad, fechas, recurrencia) | comando `tasksManager.createOrEditTask`, flujo de `QuickInput` |
+| **Crear/editar tarea markdown** (descripción, prioridad, fechas, recurrencia) en un diálogo de una sola pantalla, estilo el modal "Create or edit Task" de Obsidian Tasks | comando `tasksManager.createOrEditTask` → `TaskEditWebview.ts` (`WebviewPanel`) — ver detalle abajo |
 | **CodeLens "Done / Edit / 🔁 regla"** sobre cada línea de tarea | `TaskCodeLensProvider` |
 | **Tachado de completadas + fecha vencida en rojo** en el editor | `TaskDecorations` |
 | **Bloques ` ```tasks ` renderizados en el Preview de Markdown** integrado de VS Code | `markdownTasksPlugin.ts` + `contributes.markdown.markdownItPlugins` |
+| **Estilizado de líneas de checkbox sueltas** (fuera de bloques ` ```tasks `) en el Preview: icono por estado para símbolos no estándar, tachado solo en cancelada/completada, `#tags` como pills de color | `markdownTasksPlugin.ts` (`registerRawTaskLineStyling`) + `media/tasks-preview.css` — ver detalle abajo |
 | Índice de tareas de todo el workspace, actualizado al vuelo | `TaskIndex` (escaneo inicial + `FileSystemWatcher` + debounce de ediciones) |
+
+### `markdownTasksPlugin.ts` — estilizado de líneas de checkbox sueltas
+
+En Obsidian, el plugin Tasks no solo renderiza bloques ` ```tasks ` — en la vista de lectura
+también post-procesa **cualquier** línea `- [ ] ...` de cualquier nota, dando a cada símbolo de
+estado (no solo espacio/`x`) un icono distinto y coloreando los `#tags` como pills. El Preview de
+Markdown integrado de VS Code tiene su propio renderizado nativo de checkboxes (un `<input
+type="checkbox">` real, sin relación con esta extensión), pero solo distingue "marcado"/"no
+marcado" — un símbolo como `[/]` (en curso) o `[w]` (un estado propio del usuario) colapsa al
+mismo estado binario que `[ ]`/`[x]`, y para cuando el HTML ya existe el carácter original se ha
+perdido, así que no hay forma de recuperarlo desde el DOM después de renderizar.
+
+El único punto fiable para interceptar es el **markdown fuente**, antes de que la regla de
+checkbox de VS Code (la que sea, no la implementa esta extensión) vea el `[x]`. Por eso
+`registerRawTaskLineStyling(md)`:
+
+1. Registra una regla `core` (`md.core.ruler.after('normalize', ...)`) que reescribe, línea a
+   línea, el corchete `[symbol]` de cualquier tarea con estado *no* estándar (es decir, distinto
+   de `[ ]`/`[x]`/`[X]`, que el checkbox nativo de VS Code ya renderiza bien) por un marcador
+   inerte (caracteres de la zona de uso privado Unicode, rango U+E050-U+E053, invisibles e
+   ignorados por markdown-it) — esto ocurre **antes** de que exista ningún token, así que no
+   importa qué regla de checkbox tenga registrada VS Code ni en qué orden. Detecta y salta
+   bloques de código con fences (` ``` `/`~~~`, incluidos los ` ```tasks `) para no confundir su
+   contenido con tareas reales.
+2. Registra una regla `inline` (`md.inline.ruler.before('text', ...)`) para `#tags`, que sí puede
+   ser una regla normal porque `#` ya es un carácter terminador de la regla `text` de
+   markdown-it — de modo que backticks/enlaces/wikilinks (que consumen su span completo antes de
+   que la regla de texto llegue a los caracteres internos) protegen automáticamente cualquier
+   `#` dentro de código o `[[Nota#Ancla]]` sin lógica adicional. Aplica en todo el documento, no
+   solo en líneas de tarea, igual que el coloreado de tags nativo de Obsidian.
+3. Envuelve `renderer.render`/`renderer.renderInline` para sustituir los marcadores por el HTML
+   final (icono de estado, o `<span class="tasks-cancelled-text">` envolviendo el resto de la
+   línea para `-`/Cancelled) una vez generada la cadena completa.
+
+El mapa de iconos (`STATUS_ICON_EMOJI`) cubre `/` (🔄, En curso) y `-` (❌, Cancelada) — los
+valores por defecto de Obsidian Tasks — más `w` (⏸️, En espera) y `d` (👤, Delegada), que
+coinciden con la convención que este propio `Pruebas.md` documenta en su sección "Notas
+adicionales". Cualquier otro símbolo cae a una insignia genérica con el carácter tal cual, en vez
+de inventar un icono para un estado que esta extensión aún no tiene UI para registrar (ver el
+gotcha de `Config/Settings.ts` más abajo). Los estilos (pills de tags con color determinista por
+hash del texto, tachado atenuado, `accent-color` verde para el checkbox nativo marcado) están en
+`media/tasks-preview.css`, contribuido vía `contributes.markdown.previewStyles`.
+
+### `TaskEditWebview.ts` — diálogo "Create or edit Task"
+
+VS Code no tiene API para un modal flotante con HTML propio (a diferencia del Svelte modal del
+plugin original) — lo más parecido es un `WebviewPanel`, que se abre como una pestaña del editor,
+no como overlay centrado. `showTaskEditDialog()` lo aproxima con una "card" centrada sobre fondo
+oscurecido dentro de esa pestaña, replicando el layout del modal de Obsidian Tasks (rejilla de
+prioridad 3×2, una fila por fecha con icono + input de texto en lenguaje natural + `<input
+type="date">` nativo como atajo, texto de vista previa de la recurrencia en cursiva).
+
+**Alcance deliberadamente recortado** frente al modal original: solo cubre los campos que este
+port ya soportaba en el flujo de `QuickInput` anterior (descripción, prioridad, recurrencia,
+due/scheduled/start). **No** incluye `Status` (desplegable de estados registrados), `Before
+this`/`After this` (buscador de tareas para `dependsOn`/`id` — requeriría indexar tareas por id,
+no solo por texto), ni edición manual de `Created`/`Done`/`Cancelled`. Esos valores se preservan
+tal cual venían de la tarea existente al editar (ver `promptForTaskFields` en
+`commands/taskCommands.ts`), simplemente no son editables desde este diálogo todavía.
+
+Toda la validación (fechas vía `parseQueryDate`, regla de recurrencia vía `Recurrence.fromText`)
+ocurre en el **extension host**, no en el webview — `chrono-node`/`rrule` no están bundleados para
+el navegador del webview. El webview solo envía texto crudo por `postMessage` (`apply`,
+`previewRecurrence` con debounce de 250 ms mientras se escribe, `cancel`); si algo no parsea, la
+extensión responde con `{ type: 'error' }` y el diálogo se queda abierto mostrando el mensaje, sin
+cerrarse. La descripción (y cualquier otro texto libre) se incrusta en el HTML vía
+`JSON.stringify`, con los signos "menor que" adicionalmente escapados a una secuencia unicode
+literal — evita que un `</script>` presente dentro de la descripción de una tarea cierre la
+etiqueta `<script>` antes de tiempo.
 
 ### Comandos registrados
 
 | ID | Descripción |
 |---|---|
-| `tasksManager.toggleTaskLine` | Alterna el estado de la tarea markdown activa: cursor en el editor nativo, o si el archivo está abierto con un editor personalizado (Vault Tool), avisa de que no hay línea conocida |
-| `tasksManager.createOrEditTask` | Crea o edita una tarea vía QuickInput. Con editor nativo, edita la línea del cursor; sin él (editor personalizado), añade una tarea nueva al final del documento |
+| `tasksManager.toggleTaskLine` | Alterna el estado de la tarea markdown activa: cursor en el editor nativo, o si el archivo está abierto con un editor personalizado (Obsidian-like), avisa de que no hay línea conocida |
+| `tasksManager.createOrEditTask` | Crea o edita una tarea vía el diálogo webview de `TaskEditWebview.ts`. Con editor nativo, edita la línea del cursor; sin él (editor personalizado), avisa y añade una tarea nueva al final del documento — para editar una tarea real en ese caso, el editor personalizado debe llamar a `editTaskAtLocation` (ver "Fase 2") en vez de este comando |
 | `tasksManager.toggleTaskAtLine` / `editTaskAtLine` | Variantes con `(uri, line)` explícitos, usadas por el CodeLens |
 
 Ambos comandos (`toggleTaskLine`, `createOrEditTask`) resuelven el documento activo también
-cuando está abierto con un editor personalizado como Vault Tool (`resolveActiveMarkdownTarget()`
+cuando está abierto con un editor personalizado como Obsidian-like (`resolveActiveMarkdownTarget()`
 en `commands/taskCommands.ts`, vía `vscode.window.tabGroups` en vez de `activeTextEditor`, que
 no existe para editores personalizados) — ver "Fase 2" más abajo para el porqué.
 
@@ -152,19 +244,19 @@ no existe para editores personalizados) — ver "Fase 2" más abajo para el porq
 Command Palette entera cuando el editor activo es uno personalizado, por el mismo motivo que
 `activeTextEditor` no existe en ese caso.
 
-### Fase 2 — integración con Vault Tool (implementada)
+### Fase 2 — integración con Obsidian-like (implementada)
 
-Vault Tool (`d:\git\obsidianlike`) abre los `.md` con un `CustomTextEditorProvider` propio
+Obsidian-like (`d:\git\obsidianlike`) abre los `.md` con un `CustomTextEditorProvider` propio
 (webview + CodeMirror 6), que **sustituye por completo** al editor de texto nativo de VS Code.
 Esto significa que el `TaskCodeLensProvider` y `TaskDecorations` de esta extensión (fase 1) son
-**invisibles** en cualquier nota abierta con Vault Tool — solo se ven si el usuario abre el
+**invisibles** en cualquier nota abierta con Obsidian-like — solo se ven si el usuario abre el
 fichero con "Open With → Text Editor". Además, dos extensiones no pueden inyectarse código una
 en el webview de la otra (aislamiento total). Por eso la integración real tiene dos piezas
 separadas, no "un hook compartido", coordinadas con un agente independiente trabajando
 directamente sobre `d:\git\obsidianlike` (repo Git completamente separado, sin relación de
 submódulo/worktree con este):
 
-1. **Renderizado (dentro del webview de Vault Tool, sin llamar a esta extensión):** detector de
+1. **Renderizado (dentro del webview de Obsidian-like, sin llamar a esta extensión):** detector de
    sintaxis de tareas propio (regex-only) en su `livePreviewPlugin`, reutilizando el manejo
    existente de nodos `ListItem`/`ListMark` para los checkboxes, y `FencedCode` para los bloques
    ` ```tasks `. Detalle completo en el `CLAUDE.md` de ese repo.
@@ -180,14 +272,35 @@ submódulo/worktree con este):
      toggleTaskLine(lineText: string): string[];               // 1 línea, o 2 si crea una recurrencia
      renderTasksQuery(queryText: string): TasksQueryResultDTO;  // ejecuta una query ```tasks``` contra todo el vault
      toggleTaskAtLocation(path: string, line: number): Promise<void>; // alterna una tarea en CUALQUIER fichero del vault
-     onDidChangeTasks: vscode.Event<void>;                      // para que Vault Tool refresque los bloques visibles
+     editTaskAtLocation(path: string, line: number): Promise<void>;   // abre el diálogo "Create or edit Task" para esa tarea
+     onDidChangeTasks: vscode.Event<void>;                      // para que Obsidian-like refresque los bloques visibles
    }
    ```
 
-   Vault Tool trata esto como dependencia **opcional** (comprueba que `getExtension(...)` existe
+   Obsidian-like trata esto como dependencia **opcional** (comprueba que `getExtension(...)` existe
    antes de llamar, con fallback a un toggle simple `[ ]`↔`[x]` si esta extensión no está
-   instalada) para seguir funcionando de forma standalone. `renderTasksQuery`/`toggleTaskAtLocation`
-   devuelven datos vacíos/no-op si no hay workspace folder abierto (nada que indexar), no un error.
+   instalada) para seguir funcionando de forma standalone. `renderTasksQuery`/`toggleTaskAtLocation`/
+   `editTaskAtLocation` devuelven datos vacíos/no-op si no hay workspace folder abierto (nada que
+   indexar), no un error.
+
+   **`editTaskAtLocation` existe específicamente por esto**: el comando
+   `tasksManager.createOrEditTask` de esta extensión (basado en el cursor de
+   `vscode.window.activeTextEditor`) no tiene forma de saber en qué línea estaba el usuario cuando
+   la pestaña activa muestra el fichero a través del editor personalizado de **otra** extensión —
+   VS Code no expone la posición del cursor de un `CustomTextEditorProvider` ajeno. Antes, ese caso
+   caía silenciosamente a "crear una tarea nueva al final del documento" (ahora al menos avisa con
+   un mensaje, ver `createOrEditTaskAtCursor` en `commands/taskCommands.ts`), pero seguía sin poder
+   editar la tarea real que el usuario tenía delante. Obsidian-like, en cambio, sí sabe exactamente
+   qué tarea pulsó el usuario en su propio webview (igual que ya sabe lo suficiente para llamar a
+   `toggleTaskAtLocation`) — así que su UI de "editar tarea" llama a `editTaskAtLocation(path,
+   line)` en vez de (o antes de) invocar el comando de la paleta.
+
+   **Cableado del lado de `d:\git\obsidianlike` (implementado)**: cada checkbox de tarea —
+   tanto en línea (`TaskCheckboxWidget`) como en filas de resultados de un bloque ` ```tasks ` —
+   muestra un botón ✏️ junto al checkbox (`.cm-task-edit-btn` / `.cm-task-query-edit-btn`) que
+   envía `{ type: 'edit-task', line }` o `{ type: 'edit-task-at-location', path, line }` al
+   extension host de Obsidian-like, el cual llama a `editTaskAtLocation`. Detalle completo en la
+   sección "Editing a task" del `CLAUDE.md` de ese repo.
 
 ### Scripts npm
 
@@ -231,7 +344,7 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
   aparente de por qué. Diagnosticado leyendo `%APPDATA%\Code\logs\<sesión>\window*\exthost\exthost.log`
   (o el del perfil correspondiente) en busca de `Activating extension ... failed`.
 - **`activeTextEditor`/`editorLangId`/`editorTextFocus` no existen para editores personalizados**:
-  si otra extensión (p. ej. Vault Tool) abre `.md` con un `CustomTextEditorProvider`, VS Code no
+  si otra extensión (p. ej. Obsidian-like) abre `.md` con un `CustomTextEditorProvider`, VS Code no
   lo expone como `TextEditor` ni activa esos context keys. Cualquier comando o `menus.commandPalette`
   `when` que dependa de ellos queda invisible/no-op mientras esa extensión sea el editor activo.
   Alternativa: `vscode.window.tabGroups.activeTabGroup.activeTab.input` (con `TabInputText` /
@@ -243,7 +356,7 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
   `{ ...createTasksApi(...) }`; `TasksApi.ts` definía `onDidChangeTasks` como
   `get onDidChangeTasks() { return taskIndex?.onDidChange ?? ...; }`, y como ese spread ocurre
   **antes** de que `taskIndex` se cree, el getter siempre veía `undefined` y dejaba fijado para
-  siempre un `EventEmitter` huérfano que nadie disparaba — Vault Tool se "suscribía con éxito"
+  siempre un `EventEmitter` huérfano que nadie disparaba — Obsidian-like se "suscribía con éxito"
   pero nunca recibía nada. Arreglado pasando un `EventEmitter` **estable**, creado a nivel de
   módulo antes de que exista `taskIndex`, como parámetro de `createTasksApi(...)`, en vez de
   calcularlo con un getter en el momento del spread. Diagnosticado con un `OutputChannel` real
@@ -252,8 +365,13 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
 
 ### Próximos pasos posibles
 
-- Ampliar `core/Query/Query.ts` hacia la paridad completa del DSL original (filtros de
-  `dependsOn`/`id`, `urgency` como criterio de orden por defecto, `sort by function`)
+- Ampliar `core/Query/Query.ts` hacia la paridad completa del DSL original (`urgency` como
+  criterio de orden por defecto, `sort by function`, toggles reales de layout para `hide`/`show`
+  en vez de no-op, expansión de `{{query.file.path}}` y otros placeholders de
+  `Scripting/ExpandPlaceholders.ts`)
 - UI de settings real para `Config/Settings.ts` (hoy son valores por defecto fijos) y para
   registrar statuses personalizados (p. ej. "Delegated") usados en `status.name`/`status.type`
+- Ampliar `TaskEditWebview.ts` con los campos que quedaron fuera a propósito: `Status`
+  (desplegable), `Before this`/`After this` (buscador de `dependsOn`/`id`), edición manual de
+  `Created`/`Done`/`Cancelled`
 - Tests automatizados con `@vscode/test-electron` (hoy la validación es manual/smoke-test)
