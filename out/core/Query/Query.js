@@ -19,6 +19,32 @@ const DATE_FIELD_ALIASES = {
     created: 'created',
     cancelled: 'cancelled',
 };
+// Layout/display instructions (`hide <x>` / `show <x>`) that Obsidian Tasks recognises. This
+// port's renderer (markdownTasksPlugin.ts) doesn't yet have per-field toggles, so these are
+// accepted-but-no-op — the point is only to stop them from being reported as unrecognised lines,
+// matching upstream's list of valid option names (Layout/TaskLayoutOptions.ts,
+// Layout/QueryLayoutOptions.ts) so a typo like `hide diu date` is still flagged.
+const HIDE_SHOW_OPTION_KEYWORDS = [
+    'cancelled date',
+    'created date',
+    'depends on',
+    'done date',
+    'due date',
+    'id',
+    'on completion',
+    'priority',
+    'recurrence rule',
+    'scheduled date',
+    'start date',
+    'tags',
+    'backlink',
+    'edit button',
+    'postpone button',
+    'task count',
+    'toolbar',
+    'tree',
+    'urgency',
+];
 const PRIORITY_NAME_TO_VALUE = {
     highest: Priority_1.Priority.Highest,
     high: Priority_1.Priority.High,
@@ -162,7 +188,7 @@ class TasksQuery {
     }
     // ---- parsing -----------------------------------------------------------------------
     parseLine(line) {
-        if (this.parseSortBy(line) || this.parseGroupBy(line) || this.parseLimit(line)) {
+        if (this.parseSortBy(line) || this.parseGroupBy(line) || this.parseLimit(line) || this.parseHideShow(line)) {
             return true;
         }
         const filterFn = this.parseBooleanExpression(line);
@@ -217,6 +243,9 @@ class TasksQuery {
         return (this.parseStatusFilter(text) ??
             this.parseStatusTypeFilter(text) ??
             this.parseDateFilter(text) ??
+            this.parseHappensFilter(text) ??
+            this.parseDependsOnFilter(text) ??
+            this.parseIdFilter(text) ??
             this.parsePriorityFilter(text) ??
             this.parsePathFilter(text) ??
             this.parseDescriptionRegexFilter(text) ??
@@ -276,6 +305,57 @@ class TasksQuery {
                     return value.isAfter(target, 'day');
                 return value.isSame(target, 'day');
             };
+        }
+        return null;
+    }
+    /** `happens before/after/on <date>`, `has happens date`, `no happens date` — a pseudo date
+     * field matching if ANY of due/scheduled/start satisfies the condition, mirroring upstream's
+     * `HappensDateField` (used for e.g. `(happens before tomorrow) OR (no due date)`-style
+     * queries where "happens" stands in for whichever date the task is best known by). */
+    parseHappensFilter(line) {
+        if (/^has happens date$/i.test(line)) {
+            return (task) => task.happensDates.some((date) => date !== null);
+        }
+        if (/^no happens date$/i.test(line)) {
+            return (task) => !task.happensDates.some((date) => date !== null);
+        }
+        const comparisonMatch = line.match(/^happens (before|after|on)\s+(.+)$/i);
+        if (comparisonMatch) {
+            const comparison = comparisonMatch[1].toLowerCase();
+            const target = (0, DateParsing_1.parseQueryDate)(comparisonMatch[2]);
+            if (target === null) {
+                return null;
+            }
+            return (task) => task.happensDates.some((value) => {
+                if (value === null || !value.isValid()) {
+                    return false;
+                }
+                if (comparison === 'before')
+                    return value.isBefore(target, 'day');
+                if (comparison === 'after')
+                    return value.isAfter(target, 'day');
+                return value.isSame(target, 'day');
+            });
+        }
+        return null;
+    }
+    /** `has depends on` / `no depends on` — whether the task lists any other task ids it depends on. */
+    parseDependsOnFilter(line) {
+        if (/^has depends on$/i.test(line)) {
+            return (task) => task.dependsOn.length > 0;
+        }
+        if (/^no depends on$/i.test(line)) {
+            return (task) => task.dependsOn.length === 0;
+        }
+        return null;
+    }
+    /** `has id` / `no id` — whether the task has been given an `🆔` value. */
+    parseIdFilter(line) {
+        if (/^has id$/i.test(line)) {
+            return (task) => task.id.length > 0;
+        }
+        if (/^no id$/i.test(line)) {
+            return (task) => task.id.length === 0;
         }
         return null;
     }
@@ -439,6 +519,19 @@ class TasksQuery {
         }
         this.limitCount = Number.parseInt(match[1], 10);
         return true;
+    }
+    /** `hide <field>` / `show <field>`, e.g. `hide id`. Recognised-but-no-op: this port's
+     * renderer (markdownTasksPlugin.ts) always shows the same fixed set of badges and doesn't
+     * yet have per-field layout toggles, so there's nothing to actually hide. Still validated
+     * against upstream's known option names ({@link HIDE_SHOW_OPTION_KEYWORDS}) so the line is
+     * accepted rather than reported as unrecognised, and a genuine typo is still caught. */
+    parseHideShow(line) {
+        const match = line.match(/^(?:hide|show) +(.+)$/i);
+        if (!match) {
+            return false;
+        }
+        const option = match[1].toLowerCase();
+        return HIDE_SHOW_OPTION_KEYWORDS.some((keyword) => option.startsWith(keyword));
     }
     toSortableField(keyword) {
         const lower = keyword.toLowerCase();
