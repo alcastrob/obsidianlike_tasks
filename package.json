@@ -4,6 +4,7 @@
   "description": "Manage markdown checkbox tasks a-la Obsidian Tasks, directly in VS Code",
   "version": "0.1.0",
   "publisher": "angelCastro",
+  "icon": "media/obsidian-icon-violeta.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -36,7 +37,10 @@
       }
     ],
     "markdown": {
-      "markdownItPlugins": true
+      "markdownItPlugins": true,
+      "previewStyles": [
+        "./media/tasks-preview.css"
+      ]
     }
   },
   "scripts": {

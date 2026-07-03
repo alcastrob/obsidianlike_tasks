@@ -1,0 +1,60 @@
+/* Styling for the Markdown Preview's task rendering (both plain `- [ ]` checkbox lines and
+ * ```tasks``` query blocks) — see markdownTasksPlugin.ts for what generates this markup. */
+
+/* Obsidian's Tasks plugin shows a green checked box; VS Code's built-in checkbox defaults to the
+ * editor's accent (usually blue). `accent-color` is the only thing a disabled native checkbox
+ * exposes for recolouring. */
+input[type='checkbox']:checked {
+    accent-color: #3fb950;
+}
+
+.tasks-status-icon {
+    display: inline-block;
+    margin: 0 0.15em;
+}
+
+.tasks-status-icon-unknown {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.2em;
+    height: 1.2em;
+    padding: 0 0.2em;
+    border-radius: 999px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    font-size: 0.75em;
+    vertical-align: middle;
+}
+
+.tasks-cancelled-text {
+    text-decoration: line-through;
+    color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+}
+
+.tasks-tag {
+    display: inline-block;
+    padding: 0 0.6em;
+    margin: 0 0.15em;
+    border-radius: 999px;
+    font-size: 0.85em;
+    line-height: 1.7em;
+    background: hsl(var(--tasks-tag-hue) 55% 40%);
+    color: #fff;
+    white-space: nowrap;
+}
+
+.tasks-badge {
+    display: inline-block;
+    padding: 0 0.6em;
+    margin: 0 0.15em;
+    border-radius: 999px;
+    font-size: 0.85em;
+    line-height: 1.7em;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.tasks-query-warning {
+    color: var(--vscode-errorForeground);
+}
