@@ -13,6 +13,10 @@ export interface TaskDTO {
     description: string;
     tags: string[];
     isDone: boolean;
+    /** The raw checkbox symbol (`' '`, `'x'`, `'/'`, a custom letter, ...) — `isDone` alone can't
+     * distinguish "in progress" from "todo" from "some custom status", which a consumer needs to
+     * render a matching status icon instead of a plain checked/unchecked checkbox. */
+    statusSymbol: string;
     isOverdue: boolean;
     priority: string;
     dueDate: string | null;
@@ -111,6 +115,7 @@ function toDto(task: Task): TaskDTO {
         description: task.descriptionWithoutTags,
         tags: task.tags,
         isDone: task.isDone,
+        statusSymbol: task.status.symbol,
         isOverdue: !task.isDone && task.dueDate !== null && task.dueDate.isBefore(moment(), 'day'),
         priority: task.priorityName,
         dueDate: task.dueDate ? task.dueDate.format('YYYY-MM-DD') : null,
@@ -196,13 +201,16 @@ export function createTasksApi(
             const uri = vscode.Uri.joinPath(folder.uri, path);
             const document = await vscode.workspace.openTextDocument(uri);
             const lineText = document.lineAt(line).text;
-            const task = await editTaskFromLineText(lineText, new TaskLocation(path, line));
-            if (!task) {
+            const tasks = await editTaskFromLineText(lineText, new TaskLocation(path, line), () =>
+                getTaskIndex()?.getAllTasks() ?? [],
+            );
+            if (!tasks) {
                 return;
             }
 
+            const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
             const edit = new vscode.WorkspaceEdit();
-            edit.replace(uri, document.lineAt(line).range, task.toFileLineString());
+            edit.replace(uri, document.lineAt(line).range, tasks.map((t) => t.toFileLineString()).join(eol));
             await vscode.workspace.applyEdit(edit);
         },
 

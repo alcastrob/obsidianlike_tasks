@@ -50,6 +50,7 @@ function toDto(task) {
         description: task.descriptionWithoutTags,
         tags: task.tags,
         isDone: task.isDone,
+        statusSymbol: task.status.symbol,
         isOverdue: !task.isDone && task.dueDate !== null && task.dueDate.isBefore((0, moment_1.default)(), 'day'),
         priority: task.priorityName,
         dueDate: task.dueDate ? task.dueDate.format('YYYY-MM-DD') : null,
@@ -121,12 +122,13 @@ function createTasksApi(getTaskIndex, onDidChangeTasks) {
             const uri = vscode.Uri.joinPath(folder.uri, path);
             const document = await vscode.workspace.openTextDocument(uri);
             const lineText = document.lineAt(line).text;
-            const task = await (0, taskCommands_1.editTaskFromLineText)(lineText, new TaskLocation_1.TaskLocation(path, line));
-            if (!task) {
+            const tasks = await (0, taskCommands_1.editTaskFromLineText)(lineText, new TaskLocation_1.TaskLocation(path, line), () => getTaskIndex()?.getAllTasks() ?? []);
+            if (!tasks) {
                 return;
             }
+            const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
             const edit = new vscode.WorkspaceEdit();
-            edit.replace(uri, document.lineAt(line).range, task.toFileLineString());
+            edit.replace(uri, document.lineAt(line).range, tasks.map((t) => t.toFileLineString()).join(eol));
             await vscode.workspace.applyEdit(edit);
         },
         onDidChangeTasks,

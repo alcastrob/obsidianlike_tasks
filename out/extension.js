@@ -70,13 +70,13 @@ async function activate(context) {
     context.subscriptions.push(vscode.commands.registerCommand('tasksManager.toggleTaskLine', () => {
         void (0, taskCommands_1.toggleTaskAtCursor)();
     }), vscode.commands.registerCommand('tasksManager.createOrEditTask', () => {
-        void (0, taskCommands_1.createOrEditTaskAtCursor)();
+        void (0, taskCommands_1.createOrEditTaskAtCursor)(() => taskIndex?.getAllTasks() ?? []);
     }), vscode.commands.registerCommand('tasksManager.toggleTaskAtLine', async (uri, line) => {
         const editor = await vscode.window.showTextDocument(uri, { preserveFocus: true });
         await (0, taskCommands_1.toggleTaskOnLine)(editor, line);
     }), vscode.commands.registerCommand('tasksManager.editTaskAtLine', async (uri, line) => {
         const editor = await vscode.window.showTextDocument(uri, { preserveFocus: true });
-        await (0, taskCommands_1.createOrEditTaskOnLine)(editor, line);
+        await (0, taskCommands_1.createOrEditTaskOnLine)(editor, line, () => taskIndex?.getAllTasks() ?? []);
     }), 
     // Target for informational CodeLenses (e.g. the recurrence rule badge) that aren't meant
     // to do anything when clicked.

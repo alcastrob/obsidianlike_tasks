@@ -208,23 +208,64 @@ oscurecido dentro de esa pestaña, replicando el layout del modal de Obsidian Ta
 prioridad 3×2, una fila por fecha con icono + input de texto en lenguaje natural + `<input
 type="date">` nativo como atajo, texto de vista previa de la recurrencia en cursiva).
 
-**Alcance deliberadamente recortado** frente al modal original: solo cubre los campos que este
-port ya soportaba en el flujo de `QuickInput` anterior (descripción, prioridad, recurrencia,
-due/scheduled/start). **No** incluye `Status` (desplegable de estados registrados), `Before
-this`/`After this` (buscador de tareas para `dependsOn`/`id` — requeriría indexar tareas por id,
-no solo por texto), ni edición manual de `Created`/`Done`/`Cancelled`. Esos valores se preservan
-tal cual venían de la tarea existente al editar (ver `promptForTaskFields` en
-`commands/taskCommands.ts`), simplemente no son editables desde este diálogo todavía.
+Cubre el mismo conjunto de campos que el modal Svelte original: descripción, prioridad,
+recurrencia, due/scheduled/start, **Before this**/**After this** (dependencias), **Status**
+(desplegable de estados registrados) y **Created**/**Done**/**Cancelled**. La única pieza que
+sigue sin puerto es un editor de `On Completion` — se preserva tal cual venía de la tarea existente
+(`existing?.onCompletion ?? OnCompletion.Ignore` en `promptForTaskFields`), sin UI propia todavía.
 
 Toda la validación (fechas vía `parseQueryDate`, regla de recurrencia vía `Recurrence.fromText`)
 ocurre en el **extension host**, no en el webview — `chrono-node`/`rrule` no están bundleados para
 el navegador del webview. El webview solo envía texto crudo por `postMessage` (`apply`,
-`previewRecurrence` con debounce de 250 ms mientras se escribe, `cancel`); si algo no parsea, la
-extensión responde con `{ type: 'error' }` y el diálogo se queda abierto mostrando el mensaje, sin
-cerrarse. La descripción (y cualquier otro texto libre) se incrusta en el HTML vía
-`JSON.stringify`, con los signos "menor que" adicionalmente escapados a una secuencia unicode
-literal — evita que un `</script>` presente dentro de la descripción de una tarea cierre la
-etiqueta `<script>` antes de tiempo.
+`previewRecurrence` con debounce de 250 ms mientras se escribe, `statusChanged`,
+`searchDependency`, `cancel`); si algo no parsea, la extensión responde con `{ type: 'error' }` y
+el diálogo se queda abierto mostrando el mensaje, sin cerrarse. La descripción (y cualquier otro
+texto libre) se incrusta en el HTML vía `JSON.stringify`, con los signos "menor que"
+adicionalmente escapados a una secuencia unicode literal — evita que un `</script>` presente
+dentro de la descripción de una tarea cierre la etiqueta `<script>` antes de tiempo.
+
+**Status** (`status.svelte`'s `StatusEditor` equivalente): el desplegable se rellena con
+`StatusRegistry.getInstance().registeredStatuses` (por defecto solo TODO/IN_PROGRESS/DONE/
+CANCELLED — ver el gotcha de `Config/Settings.ts`/statuses personalizados en la sección de
+`core/Query/Query.ts`). Al cambiar de estado, el webview manda `statusChanged` (símbolo elegido +
+el texto actual de Done/Cancelled) y el extension host responde `statusDatesUpdated` calculado
+contra una `baselineTask` fija (la tarea existente, o una TODO recién creada si se está creando una
+tarea) vía `baselineTask.handleNewStatus(newStatus)` — mismo cálculo que
+`StatusEditor.svelte`/`setStatusRelatedDate` del original: solo pisa el campo de fecha si está
+vacío (al entrar en ese estado) o lo vacía si estaba relleno pero el nuevo estado ya no aplica;
+si el usuario ya escribió algo a mano, se respeta.
+
+**Before this / After this** (`Dependency.svelte` equivalente): el webview no tiene acceso al
+índice de tareas del workspace, así que la búsqueda (`searchDependency` → `dependencyResults`) la
+resuelve el extension host contra `context.allTasks` (un snapshot de `TaskIndex.getAllTasks()`
+tomado al abrir el diálogo) usando `DependencySearch.ts` — una aproximación propia de scoring
+por subcadena/subsecuencia, ya que aquí no hay vault de Obsidian del que tirar de
+`prepareSimpleSearch`. Cada candidato viaja como `{ key: "path#line", description, path,
+statusSymbol }`; `key` es la identidad usada tanto para excluir ya-seleccionados como para
+resolver la selección final de vuelta a un `Task` real al pulsar Apply. `promptForTaskFields`
+hace el resto (equivalente a `EditableTask.applyEdits` del original):
+- Para "Before this" (`dependsOn` de esta tarea), cada tarea seleccionada necesita un `id` —
+  si no lo tiene, `ensureTaskHasId`/`generateUniqueId` (`core/Task/TaskDependency.ts`, port de
+  `Task/TaskDependency.ts`) le asigna uno y `TaskFileEditor.replaceTaskWithTasks` lo escribe en
+  su archivo (que puede no ser el que se está editando).
+- Para "After this", son las *otras* tareas las que necesitan `dependsOn` apuntando al `id` de
+  ésta — si esta tarea aún no tiene uno y el conjunto de "after this" cambió, se genera aquí. Se
+  diferencia contra el `dependsOn`-inverso calculado al abrir el diálogo (tareas cuyo `dependsOn`
+  ya incluía el id de ésta) para saber a qué archivos añadir/quitar el id vía
+  `addDependencyToParent`/`removeDependency` + `replaceTaskWithTasks`.
+- Solo entonces se construye la `Task` final y se le aplica la transición de estado real vía
+  `handleNewStatusWithRecurrenceInUsersOrder` (con el `today` inferido de los campos Done/Cancelled
+  tal como el usuario los dejó, igual que `EditableTask.inferTodaysDate`) — por lo que completar
+  una tarea recurrente **desde el diálogo** (cambiando Status a Done) genera la siguiente
+  ocurrencia igual que el comando de toggle. Por eso `promptForTaskFields`/`editTaskFromLineText`
+  devuelven `Task[]` (no un único `Task`) y todos los llamantes (`createOrEditTaskOnLine`,
+  `createTaskAppendedToDocument`, `TasksApi.editTaskAtLocation`) escriben esa lista completa.
+
+`getAllTasks: () => Task[]` se pasa en cascada desde `extension.ts` (`() =>
+taskIndex?.getAllTasks() ?? []`) hasta `promptForTaskFields`, incluida la vía
+`TasksApi.editTaskAtLocation` — con workspace vacío o sin `TaskIndex`, es `[]` y los campos
+Before this/After this simplemente se muestran deshabilitados (mismo mensaje que el original:
+"Blocking and blocked by fields are disabled...").
 
 ### Comandos registrados
 
@@ -371,7 +412,6 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
   `Scripting/ExpandPlaceholders.ts`)
 - UI de settings real para `Config/Settings.ts` (hoy son valores por defecto fijos) y para
   registrar statuses personalizados (p. ej. "Delegated") usados en `status.name`/`status.type`
-- Ampliar `TaskEditWebview.ts` con los campos que quedaron fuera a propósito: `Status`
-  (desplegable), `Before this`/`After this` (buscador de `dependsOn`/`id`), edición manual de
-  `Created`/`Done`/`Cancelled`
+- Editor de `On Completion` en `TaskEditWebview.ts` (único campo del modal original que sigue sin
+  puerto; ver la sección de `TaskEditWebview.ts` más arriba)
 - Tests automatizados con `@vscode/test-electron` (hoy la validación es manual/smoke-test)
