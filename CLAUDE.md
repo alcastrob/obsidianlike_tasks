@@ -190,16 +190,16 @@ checkbox de VS Code (la que sea, no la implementa esta extensión) vea el `[x]`.
    final (icono de estado, o `<span class="tasks-cancelled-text">` envolviendo el resto de la
    línea para `-`/Cancelled) una vez generada la cadena completa.
 
-El mapa de iconos (`STATUS_ICON_EMOJI`) cubre `/` (🔄, En curso) y `-` (❌, Cancelada) — los
-valores por defecto de Obsidian Tasks — más `w` (⏸️, En espera) y `d` (👤, Delegada), que
-coinciden con la convención que este propio `Pruebas.md` documenta en su sección "Notas
-adicionales". Cualquier otro símbolo cae a una insignia genérica con el carácter tal cual, en vez
-de inventar un icono para un estado que esta extensión aún no tiene UI para registrar (ver el
-gotcha de `Config/Settings.ts` más abajo). Los estilos (pills de tags con color determinista por
-hash del texto, tachado atenuado, `accent-color` verde para el checkbox nativo marcado) están en
+El mapa de iconos (`STATUS_ICON_EMOJI`) cubre `/` (🔄, En curso), `w` (⏳, En espera), `d` (👤,
+Delegada) y `-` (✖, Cancelada) — el conjunto completo de 6 estados que esta extensión soporta,
+junto con `⚪`/`✅` para `[ ]`/`[x]` (ambos dejados al checkbox nativo de VS Code, no a un icono
+propio). Cualquier otro símbolo cae a una insignia genérica con el carácter tal cual, en vez de
+inventar un icono para un estado que esta extensión aún no tiene UI para registrar (ver el gotcha
+de `Config/Settings.ts` más abajo). Los estilos (pills de tags con color determinista por hash del
+texto, tachado atenuado, `accent-color` verde para el checkbox nativo marcado) están en
 `media/tasks-preview.css`, contribuido vía `contributes.markdown.previewStyles`.
 
-**Alineación icono-de-estado vs checkbox nativo**: un emoji a color (🔄❌⏸️👤) se renderiza
+**Alineación icono-de-estado vs checkbox nativo**: un emoji a color (🔄✖⏳👤) se renderiza
 sensiblemente más grande que el `<input type="checkbox">` nativo al mismo `font-size` — sin una
 caja explícita compartida, una lista con líneas de distinto estado quedaba con iconos de tamaño y
 padding inconsistentes entre sí y respecto al checkbox (comprobado renderizando una muestra real

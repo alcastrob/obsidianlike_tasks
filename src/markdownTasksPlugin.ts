@@ -134,16 +134,16 @@ const ICON_MARKER_CLOSE = '';
 const CANCELLED_STRIKE_OPEN = '';
 const CANCELLED_STRIKE_CLOSE = '';
 
-/** Obsidian-Tasks-community-convention icons for statuses beyond the core `[ ]`/`[x]`. `/` and
- * `-` are the upstream defaults (in-progress / cancelled); `w`/`d` match the "En espera"/
- * "Delegada" convention this port's own `Pruebas.md`-style vaults document under a "Notas
- * adicionales" section. Anything else falls back to a small badge showing the raw symbol, rather
- * than guessing a meaning for a status this extension has no settings UI to register (see
- * CLAUDE.md's "Config/Settings.ts es un stub" gotcha). */
+/** Icons for statuses beyond the core `[ ]`/`[x]` (⚪/✅, both left to VS Code's native checkbox —
+ * see `rewriteTaskCheckboxLine` below). `/` "En curso", `w` "En espera", `d` "Delegada", `-`
+ * "Cancelada" — this exact 6-status set/icon pairing is the one this extension commits to.
+ * Anything else falls back to a small badge showing the raw symbol, rather than guessing a
+ * meaning for a status this extension has no settings UI to register (see CLAUDE.md's
+ * "Config/Settings.ts es un stub" gotcha). */
 const STATUS_ICON_EMOJI: Record<string, string> = {
     '/': '🔄',
-    '-': '❌',
-    w: '⏸️',
+    '-': '✖',
+    w: '⏳',
     d: '👤',
 };
 
