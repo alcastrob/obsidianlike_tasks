@@ -24,9 +24,9 @@ Extensión de VS Code que porta el plugin [Tasks](https://github.com/obsidian-ta
 | Comando | Qué hace |
 |---|---|
 | **Obsidian-Like Tasks: Toggle Task Done** | Alterna el estado de la tarea en la línea del cursor. Atajo por defecto: `Ctrl+Enter` en un archivo markdown. |
-| **Obsidian-Like Tasks: Create or Edit Task** | Abre el diálogo para crear una tarea nueva, o editar la de la línea del cursor si ya es una tarea. |
+| **Obsidian-Like Tasks: Create or Edit Task** | Abre el diálogo para crear una tarea nueva, o editar la de la línea del cursor si ya es una tarea. Atajo por defecto: `Shift+Alt+E` en un archivo markdown. |
 
-Ambos comandos también funcionan si el archivo está abierto con un editor personalizado de otra extensión (como Obsidian-like) que sustituye al editor de texto nativo de VS Code — en ese caso VS Code no expone una posición de cursor, así que "Create or Edit Task" avisa con un mensaje y añade la tarea nueva al final del documento en vez de editar una existente. Para editar una tarea concreta desde un editor personalizado, esa extensión debe llamar a la API pública (`editTaskAtLocation`, ver más abajo) con la ubicación exacta — es lo que hace Obsidian-like con el botón ✏️ junto a cada checkbox.
+Ambos comandos, y sus atajos, dependen del editor de texto **nativo** de VS Code para saber en qué línea está el cursor. Si el archivo está abierto con un editor personalizado de otra extensión (como Obsidian-like) que sustituye al editor nativo, VS Code no expone esa posición de cursor a este lado, así que aquí "Create or Edit Task" avisa con un mensaje y añade la tarea nueva al final del documento en vez de editar una existente — y el atajo `Shift+Alt+E` contribuido por esta extensión simplemente no llega a dispararse (su `when` exige `editorTextFocus`, que no existe para un editor personalizado). Para editar una tarea concreta desde un editor personalizado hace falta que **esa** extensión resuelva su propio cursor (solo ella lo conoce) y llame a la API pública (`editTaskAtLocation`, ver más abajo) con la ubicación exacta — es lo que hace Obsidian-like tanto con el botón ✏️ junto a cada checkbox como con su propio atajo de teclado equivalente dentro de su editor.
 
 ## Integración con otras extensiones
 

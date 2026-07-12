@@ -19,7 +19,7 @@ viejos menciona rutas `vscode-extension/...`, tradúcelas mentalmente a la raíz
 
 Extensión de VS Code llamada **"Obsidian-Like Tasks"** que permite crear, completar y eliminar tareas directamente desde el editor, sin salir al navegador ni a otra app. Inspirada en el plugin Tasks de Obsidian. El nombre evita confundirla con la funcionalidad nativa de VS Code "Tasks" (`tasks.json`, `Tasks: Run Build Task`, etc.) — por eso todos los comandos de esta extensión llevan el prefijo `Obsidian-Like Tasks:` en la Command Palette.
 
-**Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (sin relación con el nombre de la carpeta del repo, `obsidianlike_tasks`), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Obsidian-like (`d:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `d:\git\obsidianlike\CLAUDE.md`.
+**Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (sin relación con el nombre de la carpeta del repo, `obsidianlike_tasks`), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Obsidian-like (`c:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `c:\git\obsidianlike\CLAUDE.md`.
 
 ### Stack
 
@@ -206,7 +206,15 @@ plugin original) — lo más parecido es un `WebviewPanel`, que se abre como una
 no como overlay centrado. `showTaskEditDialog()` lo aproxima con una "card" centrada sobre fondo
 oscurecido dentro de esa pestaña, replicando el layout del modal de Obsidian Tasks (rejilla de
 prioridad 3×2, una fila por fecha con icono + input de texto en lenguaje natural + `<input
-type="date">` nativo como atajo, texto de vista previa de la recurrencia en cursiva).
+type="date">` nativo como atajo, texto de vista previa de la recurrencia en cursiva). Se abre con
+`{ viewColumn: vscode.ViewColumn.Beside, preserveFocus: false }` — no `ViewColumn.Active` (probado
+primero): ese sustituye la pestaña activa en el mismo grupo, así que el documento que se estaba
+editando desaparecía detrás del diálogo (un grupo de pestañas solo muestra una a la vez).
+`ViewColumn.Beside` abre una columna dividida junto a la actual, dejando el documento visible — lo
+más cerca que permite `WebviewPanel` de un modal flotante real. Al cargar, el foco se pone en el
+`<textarea>` de la descripción con el cursor al final del texto (`descriptionEl.focus()` +
+`setSelectionRange`, al final del `<script>` del webview), para poder empezar a escribir sin un
+clic previo.
 
 Cubre el mismo conjunto de campos que el modal Svelte original: descripción, prioridad,
 recurrencia, due/scheduled/start, **Before this**/**After this** (dependencias), **Status**
@@ -285,16 +293,82 @@ no existe para editores personalizados) — ver "Fase 2" más abajo para el porq
 Command Palette entera cuando el editor activo es uno personalizado, por el mismo motivo que
 `activeTextEditor` no existe en ese caso.
 
+### Atajos de teclado — por qué son dos implementaciones separadas, no una
+
+`package.json`'s `contributes.keybindings` tiene `Ctrl+Enter` → `toggleTaskLine` y
+`Shift+Alt+E` → `createOrEditTask`, ambos con `"when": "editorTextFocus && editorLangId ==
+markdown"`. Ese `when` es *justo* lo que hace que ninguno de los dos se dispare cuando el editor
+activo es el de Obsidian-like: `editorTextFocus` no existe para un `CustomTextEditorProvider`
+ajeno (mismo gotcha de siempre), así que el atajo contribuido aquí simplemente no llega a
+evaluarse como aplicable en ese contexto — no es que se dispare y falle, es que VS Code ni lo
+considera.
+
+**Historial de por qué el atajo cambió dos veces antes de llegar a `Shift+Alt+E`**:
+
+1. La primera versión usaba `Ctrl+Shift+Enter`, que resultó ser el atajo *por defecto* de VS
+   Code para "Insert Line Above" (`editor.action.insertLineBefore`). En el editor nativo esto no
+   daba problemas (una keybinding de extensión gana sobre la de VS Code para el mismo `when`),
+   pero en el editor personalizado de Obsidian-like el síntoma fue que la tecla no hacía
+   absolutamente nada — ni abría el diálogo ni el editor de CodeMirror la recibía siquiera —
+   consistente con un comportamiento documentado de VS Code donde, para un
+   `CustomTextEditorProvider`, la existencia de *cualquier* keybinding registrada para esa
+   combinación de teclas (aunque su `when` no aplique) puede bastar para que la tecla se
+   intercepte antes de llegar al webview, en vez de comprobarse contra el contexto real (ver
+   issues de VS Code `microsoft/vscode#165777` y `microsoft/vscode#241801`).
+2. Se cambió a `Ctrl+Alt+E` — sin choque con VS Code ni con ninguna extensión instalada — pero en
+   un teclado en español (y otros layouts europeos con tecla AltGr: alemán, francés, italiano,
+   portugués, escandinavos, eslavos...) `Ctrl+Alt+<letra>` es **físicamente indistinguible de
+   AltGr+<letra>**: Windows/Chromium reportan AltGr como `ctrlKey=true, altKey=true` simultáneos,
+   exactamente igual que si se hubiera pulsado Ctrl+Alt a mano. En un teclado español, AltGr+E
+   compone el carácter `€`, así que pulsar "Ctrl+Alt+E" tecleaba un euro en vez de disparar el
+   atajo — un problema que no aparece en un teclado US/UK (sin tecla AltGr) pero sí en cualquier
+   layout con ella.
+3. Se fijó `Shift+Alt+E`: ese combo nunca activa la composición de AltGr (que exige Ctrl+Alt
+   simultáneos, no Shift+Alt), y se verificó igualmente contra la referencia oficial de atajos
+   por defecto de VS Code y contra `~/.vscode/extensions/*/package.json` antes de fijarlo.
+
+**Lección para cualquier atajo futuro pensado para un `CustomTextEditorProvider` de otra
+extensión**: además de comprobar que no choque con VS Code ni con otras extensiones, evitar por
+completo el patrón `Ctrl+Alt+<letra>` — o cualquier combo cuyos modificadores coincidan con los
+de AltGr en el layout del usuario — y preferir `Ctrl+Shift+<letra>` o `Shift+Alt+<letra>`, que no
+tienen ese problema en ningún layout conocido.
+
+Se evaluó primero (y se descartó en un primer momento) la idea de que Obsidian-like publicara la
+posición de su cursor a través de su propia API exportada
+(`vscode.extensions.getExtension('angelCastro.obsidian-like')?.exports`, simétrico a como
+Obsidian-like ya consume la de esta extensión) para que un atajo contribuido *por esta extensión*
+pudiera consultarla bajo demanda, a favor de algo más simple: como el editor de Obsidian-like es
+un webview con CodeMirror 6, un atajo de teclado que le interese capturar mientras tiene foco
+puede resolverse enteramente **dentro de su propio `keymap.of([...])`** (igual que ya hace con
+`Mod-b`/`Mod-i` para negrita/cursiva) — en ese punto el cursor ya es conocido localmente, sin
+ningún salto entre extensiones.
+
+Esa primera versión (un keymap de CodeMirror puro, sin tocar el sistema de keybindings de VS
+Code) funcionaba, pero resultó insuficiente por un motivo que no se había contemplado: al no
+pasar por `contributes.keybindings`, la Paleta de Atajos de Teclado de VS Code no sabía que
+existía — no aparecía en la lista, y el usuario no podía reasignarlo a otra combinación. Para
+algo tan central eso no era aceptable, así que Obsidian-like acabó implementando una versión
+reducida de la idea inicialmente descartada: no una API pública nueva (nadie más la necesita),
+sino un mensaje `cursor-position` que el webview manda en cada cambio de selección, cacheado en
+un `Map` interno de `extension.ts`, más un comando real (`vaultTool.editTaskAtCursor`) con su
+propio `contributes.keybindings` (mismo patrón `when` que ya usa `vaultTool.openNoteQuickPick`)
+que lee esa caché en vez de `vscode.window.activeTextEditor`. Al ser una keybinding contribuida
+de verdad, sí aparece y es reasignable en la UI de VS Code. Detalle completo en el `CLAUDE.md` de
+`obsidianlike`, sección "Keyboard shortcut for 'edit task at cursor'". La idea original de una
+API pública de cursor seguiría siendo la opción correcta si algún día una *tercera* extensión
+(ni esta ni Obsidian-like) necesitara esa posición desde fuera del propio webview — no es este
+caso, por eso se quedó en un mecanismo interno de Obsidian-like.
+
 ### Fase 2 — integración con Obsidian-like (implementada)
 
-Obsidian-like (`d:\git\obsidianlike`) abre los `.md` con un `CustomTextEditorProvider` propio
+Obsidian-like (`c:\git\obsidianlike`) abre los `.md` con un `CustomTextEditorProvider` propio
 (webview + CodeMirror 6), que **sustituye por completo** al editor de texto nativo de VS Code.
 Esto significa que el `TaskCodeLensProvider` y `TaskDecorations` de esta extensión (fase 1) son
 **invisibles** en cualquier nota abierta con Obsidian-like — solo se ven si el usuario abre el
 fichero con "Open With → Text Editor". Además, dos extensiones no pueden inyectarse código una
 en el webview de la otra (aislamiento total). Por eso la integración real tiene dos piezas
 separadas, no "un hook compartido", coordinadas con un agente independiente trabajando
-directamente sobre `d:\git\obsidianlike` (repo Git completamente separado, sin relación de
+directamente sobre `c:\git\obsidianlike` (repo Git completamente separado, sin relación de
 submódulo/worktree con este):
 
 1. **Renderizado (dentro del webview de Obsidian-like, sin llamar a esta extensión):** detector de
@@ -336,7 +410,7 @@ submódulo/worktree con este):
    `toggleTaskAtLocation`) — así que su UI de "editar tarea" llama a `editTaskAtLocation(path,
    line)` en vez de (o antes de) invocar el comando de la paleta.
 
-   **Cableado del lado de `d:\git\obsidianlike` (implementado)**: cada checkbox de tarea —
+   **Cableado del lado de `c:\git\obsidianlike` (implementado)**: cada checkbox de tarea —
    tanto en línea (`TaskCheckboxWidget`) como en filas de resultados de un bloque ` ```tasks ` —
    muestra un botón ✏️ junto al checkbox (`.cm-task-edit-btn` / `.cm-task-query-edit-btn`) que
    envía `{ type: 'edit-task', line }` o `{ type: 'edit-task-at-location', path, line }` al

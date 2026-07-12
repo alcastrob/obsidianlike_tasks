@@ -159,10 +159,16 @@ export function showTaskEditDialog(
     context: TaskFormContext,
 ): Promise<TaskFormResult | undefined> {
     return new Promise((resolve) => {
+        // `ViewColumn.Active` used to be here, but that replaces the active tab in place — the
+        // document being edited disappears behind the dialog instead of staying visible, since a
+        // column only ever shows one of its tabs at a time. `ViewColumn.Beside` opens a split
+        // column next to it instead, so the source document stays visible while the dialog is open
+        // (as close as `WebviewPanel` gets to Obsidian's floating modal — VS Code has no API for an
+        // actual overlay, see the "TaskEditWebview.ts" section in CLAUDE.md).
         const panel = vscode.window.createWebviewPanel(
             'obsidianLikeTasksEditTask',
             isEditing ? 'Edit Task' : 'Create Task',
-            { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
             { enableScripts: true, retainContextWhenHidden: false },
         );
 
@@ -906,6 +912,9 @@ function renderHtml(webview: vscode.Webview, seed: TaskFormSeed, isEditing: bool
     document.getElementById('cancel').addEventListener('click', () => {
         vscode.postMessage({ type: 'cancel' });
     });
+
+    descriptionEl.focus();
+    descriptionEl.setSelectionRange(descriptionEl.value.length, descriptionEl.value.length);
 })();
 </script>
 </body>

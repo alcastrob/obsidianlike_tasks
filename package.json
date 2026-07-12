@@ -34,6 +34,11 @@
         "command": "tasksManager.toggleTaskLine",
         "key": "ctrl+enter",
         "when": "editorTextFocus && editorLangId == markdown"
+      },
+      {
+        "command": "tasksManager.createOrEditTask",
+        "key": "shift+alt+e",
+        "when": "editorTextFocus && editorLangId == markdown"
       }
     ],
     "markdown": {
