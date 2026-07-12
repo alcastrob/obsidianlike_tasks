@@ -12,6 +12,10 @@ export interface TaskDTO {
     line: number;
     description: string;
     tags: string[];
+    /** Empty string if the task has no `🆔` id. */
+    id: string;
+    /** Ids of tasks this one depends on (`⛔`) — empty if none. */
+    dependsOn: string[];
     isDone: boolean;
     /** The raw checkbox symbol (`' '`, `'x'`, `'/'`, a custom letter, ...) — `isDone` alone can't
      * distinguish "in progress" from "todo" from "some custom status", which a consumer needs to
@@ -114,6 +118,8 @@ function toDto(task: Task): TaskDTO {
         line: task.lineNumber,
         description: task.descriptionWithoutTags,
         tags: task.tags,
+        id: task.id,
+        dependsOn: task.dependsOn,
         isDone: task.isDone,
         statusSymbol: task.status.symbol,
         isOverdue: !task.isDone && task.dueDate !== null && task.dueDate.isBefore(moment(), 'day'),

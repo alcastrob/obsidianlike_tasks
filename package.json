@@ -22,11 +22,11 @@
     "commands": [
       {
         "command": "tasksManager.toggleTaskLine",
-        "title": "Obsidian-Like Tasks: Toggle Task Done"
+        "title": "Obsidian-like Tasks: Toggle Task Done"
       },
       {
         "command": "tasksManager.createOrEditTask",
-        "title": "Obsidian-Like Tasks: Create or Edit Task"
+        "title": "Obsidian-like Tasks: Create or Edit Task"
       }
     ],
     "keybindings": [

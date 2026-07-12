@@ -17,7 +17,7 @@ viejos menciona rutas `vscode-extension/...`, tradúcelas mentalmente a la raíz
 
 ### Objetivo
 
-Extensión de VS Code llamada **"Obsidian-Like Tasks"** que permite crear, completar y eliminar tareas directamente desde el editor, sin salir al navegador ni a otra app. Inspirada en el plugin Tasks de Obsidian. El nombre evita confundirla con la funcionalidad nativa de VS Code "Tasks" (`tasks.json`, `Tasks: Run Build Task`, etc.) — por eso todos los comandos de esta extensión llevan el prefijo `Obsidian-Like Tasks:` en la Command Palette.
+Extensión de VS Code llamada **"Obsidian-like Tasks"** que permite crear, completar y eliminar tareas directamente desde el editor, sin salir al navegador ni a otra app. Inspirada en el plugin Tasks de Obsidian. El nombre evita confundirla con la funcionalidad nativa de VS Code "Tasks" (`tasks.json`, `Tasks: Run Build Task`, etc.) — por eso todos los comandos de esta extensión llevan el prefijo `Obsidian-like Tasks:` en la Command Palette.
 
 **Identificador interno**: `package.json`'s `name` es `obsidian-like-tasks` (sin relación con el nombre de la carpeta del repo, `obsidianlike_tasks`), así que el id de extensión es `angelCastro.obsidian-like-tasks`. Obsidian-like (`c:\git\obsidianlike\src\extension.ts`, función `getTasksApi()`) depende de este id exacto como dependencia opcional (`vscode.extensions.getExtension('angelCastro.obsidian-like-tasks')`) — si vuelve a cambiar `name`, hay que actualizarlo también ahí y en `c:\git\obsidianlike\CLAUDE.md`.
 
@@ -198,6 +198,22 @@ de inventar un icono para un estado que esta extensión aún no tiene UI para re
 gotcha de `Config/Settings.ts` más abajo). Los estilos (pills de tags con color determinista por
 hash del texto, tachado atenuado, `accent-color` verde para el checkbox nativo marcado) están en
 `media/tasks-preview.css`, contribuido vía `contributes.markdown.previewStyles`.
+
+**Alineación icono-de-estado vs checkbox nativo**: un emoji a color (🔄❌⏸️👤) se renderiza
+sensiblemente más grande que el `<input type="checkbox">` nativo al mismo `font-size` — sin una
+caja explícita compartida, una lista con líneas de distinto estado quedaba con iconos de tamaño y
+padding inconsistentes entre sí y respecto al checkbox (comprobado renderizando una muestra real
+con markdown-it + Chrome headless, no solo a ojo). `input[type='checkbox']` y `.tasks-status-icon`
+comparten ahora una caja fija (`1.15em` × `1.15em`, `inline-flex` centrado); el icono reduce su
+`font-size` a `0.7em` con `overflow: hidden` para que el glifo (más grande que su caja) quede
+recortado en vez de desbordar. `.tasks-status-icon-unknown` (símbolos sin icono conocido) sigue
+siendo la excepción con su propia píldora de tamaño variable.
+
+**Fechas sin estilo de "badge"**: en el listado de un bloque ` ```tasks ` (`renderTaskLine`), la
+fecha de vencimiento ya no lleva la clase `tasks-badge` — antes se veía en un color/tamaño
+distinto del resto de la tarea (píldora con fondo, `font-size: 0.85em`); ahora es texto plano con
+el mismo tipo/color/peso que la descripción, conservando solo el rojo+negrita cuando está vencida.
+Prioridad y recurrencia siguen como badge (no se pidió cambiarlas).
 
 ### `TaskEditWebview.ts` — diálogo "Create or edit Task"
 
@@ -489,3 +505,10 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
 - Editor de `On Completion` en `TaskEditWebview.ts` (único campo del modal original que sigue sin
   puerto; ver la sección de `TaskEditWebview.ts` más arriba)
 - Tests automatizados con `@vscode/test-electron` (hoy la validación es manual/smoke-test)
+- `renderTaskLine` (listado de un bloque ` ```tasks ` en el Preview nativo de VS Code) solo
+  muestra prioridad/vencimiento/recurrencia como badges — no tags, `id`, dependencias,
+  fecha de inicio ni backlink con encabezado. El editor CM6 de Obsidian-like (`renderTaskRow` en
+  `webview-src/editor.js` de ese repo) ya sí los muestra, consumiendo los campos `tags`/`id`/
+  `dependsOn`/`startDate`/`heading` que `TaskDTO` (`src/api/TasksApi.ts`) ya expone — portar el
+  mismo tratamiento aquí sería solo trabajo de plantilla/CSS, los datos ya están disponibles en
+  `Task`.

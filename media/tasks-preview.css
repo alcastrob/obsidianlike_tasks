@@ -8,23 +8,43 @@ input[type='checkbox']:checked {
     accent-color: #3fb950;
 }
 
-.tasks-status-icon {
-    display: inline-block;
-    margin: 0 0.15em;
+/* A color-emoji glyph (🔄⏸️👤❌...) renders noticeably larger than a checkbox's own intrinsic
+ * size at the same font-size, and browsers give checkboxes their own default box/margin anyway —
+ * without an explicit shared box, a list mixing `[ ]`/`[x]` lines with non-default-status lines
+ * (`[/]`, `[w]`...) doesn't line up. Both share this fixed box; the icon's font-size is shrunk so
+ * its (larger) glyph fits inside instead of overflowing it. */
+input[type='checkbox'] {
+    width: 1.15em;
+    height: 1.15em;
+    vertical-align: middle;
+    position: relative;
+    top: -0.05em;
+    margin: 0 0.3em 0 0;
 }
 
-.tasks-status-icon-unknown {
+.tasks-status-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 1.2em;
-    height: 1.2em;
+    overflow: hidden;
+    width: 1.15em;
+    height: 1.15em;
+    font-size: 0.7em;
+    line-height: 1;
+    vertical-align: middle;
+    position: relative;
+    top: -0.05em;
+    margin: 0 0.3em 0 0;
+}
+
+.tasks-status-icon-unknown {
+    width: auto;
+    min-width: 1.15em;
     padding: 0 0.2em;
     border-radius: 999px;
     background: var(--vscode-badge-background);
     color: var(--vscode-badge-foreground);
     font-size: 0.75em;
-    vertical-align: middle;
 }
 
 .tasks-cancelled-text {

@@ -1,8 +1,8 @@
-# Obsidian-Like Tasks
+# Obsidian-like Tasks
 
 Extensión de VS Code que porta el plugin [Tasks](https://github.com/obsidian-tasks-group/obsidian-tasks) de Obsidian: gestiona tareas como checkboxes de markdown reales (`- [ ] ...`), directamente en tus notas, sin salir del editor.
 
-> El nombre evita confundirse con la funcionalidad nativa "Tasks" de VS Code (`tasks.json`, *Tasks: Run Build Task*). Todos los comandos de esta extensión llevan el prefijo **"Obsidian-Like Tasks:"** en la Command Palette.
+> El nombre evita confundirse con la funcionalidad nativa "Tasks" de VS Code (`tasks.json`, *Tasks: Run Build Task*). Todos los comandos de esta extensión llevan el prefijo **"Obsidian-like Tasks:"** en la Command Palette.
 
 ## Qué hace
 
@@ -23,10 +23,10 @@ Extensión de VS Code que porta el plugin [Tasks](https://github.com/obsidian-ta
 
 | Comando | Qué hace |
 |---|---|
-| **Obsidian-Like Tasks: Toggle Task Done** | Alterna el estado de la tarea en la línea del cursor. Atajo por defecto: `Ctrl+Enter` en un archivo markdown. |
-| **Obsidian-Like Tasks: Create or Edit Task** | Abre el diálogo para crear una tarea nueva, o editar la de la línea del cursor si ya es una tarea. Atajo por defecto: `Shift+Alt+E` en un archivo markdown. |
+| **Obsidian-like Tasks: Toggle Task Done** | Alterna el estado de la tarea en la línea del cursor. Atajo por defecto: `Ctrl+Enter` en un archivo markdown. |
+| **Obsidian-like Tasks: Create or Edit Task** | Abre el diálogo para crear una tarea nueva, o editar la de la línea del cursor si ya es una tarea. Atajo por defecto: `Shift+Alt+E` en un archivo markdown. |
 
-Ambos comandos, y sus atajos, dependen del editor de texto **nativo** de VS Code para saber en qué línea está el cursor. Si el archivo está abierto con un editor personalizado de otra extensión (como Obsidian-like) que sustituye al editor nativo, VS Code no expone esa posición de cursor a este lado, así que aquí "Create or Edit Task" avisa con un mensaje y añade la tarea nueva al final del documento en vez de editar una existente — y el atajo `Shift+Alt+E` contribuido por esta extensión simplemente no llega a dispararse (su `when` exige `editorTextFocus`, que no existe para un editor personalizado). Para editar una tarea concreta desde un editor personalizado hace falta que **esa** extensión resuelva su propio cursor (solo ella lo conoce) y llame a la API pública (`editTaskAtLocation`, ver más abajo) con la ubicación exacta — es lo que hace Obsidian-like tanto con el botón ✏️ junto a cada checkbox como con su propio atajo de teclado equivalente dentro de su editor.
+Ambos comandos, y sus atajos, dependen del editor de texto **nativo** de VS Code para saber en qué línea está el cursor. Si el archivo está abierto con un editor personalizado de otra extensión (como Obsidian-like) que sustituye al editor nativo, VS Code no expone esa posición de cursor a este lado, así que aquí "Create or Edit Task" avisa con un mensaje y añade la tarea nueva al final del documento en vez de editar una existente — y el atajo `Shift+Alt+E` contribuido por esta extensión simplemente no llega a dispararse (su `when` exige `editorTextFocus`, que no existe para un editor personalizado). Para editar una tarea concreta desde un editor personalizado hace falta que **esa** extensión resuelva su propio cursor (solo ella lo conoce) y llame a la API pública (`editTaskAtLocation`, ver más abajo) con la ubicación exacta — es lo que hace Obsidian-like con su propio atajo de teclado equivalente dentro de su editor.
 
 ## Integración con otras extensiones
 

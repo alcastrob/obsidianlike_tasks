@@ -21,9 +21,11 @@ function renderTaskLine(task: Task): string {
         badges.push(`<span class="tasks-badge tasks-priority">${escapeHtml(task.priorityName)}</span>`);
     }
     if (task.dueDate) {
+        // Unlike priority/recurrence, a date isn't wrapped in `.tasks-badge` — dates should read
+        // as part of the task's own text (same font/color/weight), not as a separate pill.
         const overdue = !task.isDone && task.dueDate.isBefore(moment(), 'day');
         const style = overdue ? ' style="color: #e06c75; font-weight: bold;"' : '';
-        badges.push(`<span class="tasks-badge tasks-due"${style}>📅 ${task.dueDate.format('YYYY-MM-DD')}</span>`);
+        badges.push(`<span class="tasks-due"${style}>📅 ${task.dueDate.format('YYYY-MM-DD')}</span>`);
     }
     if (task.isRecurring) {
         badges.push(`<span class="tasks-badge tasks-recurrence">🔁 ${escapeHtml(task.recurrenceRule)}</span>`);
