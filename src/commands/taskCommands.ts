@@ -131,7 +131,14 @@ async function promptForTaskFields(
             scheduledDateText: existing?.scheduledDate
                 ? existing.scheduledDate.format(TaskRegularExpressions.dateFormat)
                 : '',
-            startDateText: existing?.startDate ? existing.startDate.format(TaskRegularExpressions.dateFormat) : '',
+            // Only defaults to today for a brand-new task (`existing === null`) — editing an
+            // existing task that genuinely has no start date leaves the field empty, same as
+            // every other date field here.
+            startDateText: existing
+                ? existing.startDate
+                    ? existing.startDate.format(TaskRegularExpressions.dateFormat)
+                    : ''
+                : moment().format(TaskRegularExpressions.dateFormat),
             statusSymbol: existing?.status.symbol ?? Status.TODO.symbol,
             createdDateText: existing?.createdDate ? existing.createdDate.format(TaskRegularExpressions.dateFormat) : '',
             doneDateText: existing?.doneDate ? existing.doneDate.format(TaskRegularExpressions.dateFormat) : '',
