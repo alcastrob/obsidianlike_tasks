@@ -65,7 +65,7 @@ Para depurar: abrir esta carpeta en VS Code y pulsar **F5** (lanza un Extension 
 ## Limitaciones conocidas frente al plugin original
 
 - No hay UI de configuración (los ajustes de comportamiento — fechas automáticas al completar, orden de recurrencia, etc. — usan los valores por defecto de Obsidian Tasks, fijos en código).
-- No hay soporte para statuses personalizados con nombre propio (p. ej. "Delegated") más allá de los básicos (Todo, In Progress, Done, Cancelled).
+- No hay soporte para statuses *verdaderamente* personalizados con nombre propio más allá de los seis registrados por defecto: Todo, In Progress, Done, Cancelled, Waiting (`w`) y Delegated (`d`).
 - El orden por defecto de una query sin `sort by` es una aproximación (no completada / fecha límite / prioridad), no el cálculo real de "urgency" del plugin original — no hay `sort by function` ni `urgency` como criterio.
 - `hide`/`show <campo>` se aceptan pero no ocultan nada todavía (el renderer siempre muestra el mismo conjunto de badges).
 - El placeholder `{{query.file.path}}` (típico en `path does not include {{query.file.path}}`) no se expande — se compara como texto literal.

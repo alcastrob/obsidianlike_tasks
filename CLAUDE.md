@@ -104,9 +104,10 @@ la versión inicial. Verificado contra 6 queries reales de un vault de Obsidian 
 de prueba inventados) — ver `git log`/conversación para los ejemplos exactos.
 
 Filtros atómicos soportados: `not done`/`done`, `status.type is [not] <TYPE>` (TODO,
-IN_PROGRESS, DONE, CANCELLED, ON_HOLD, NON_TASK — statuses **personalizados** con nombre propio
-como "Delegated" no tienen UI de configuración todavía, así que su `.type` seguirá siendo TODO a
-menos que se registren a mano), `<due|scheduled|start|done|created|cancelled> before/after/on
+IN_PROGRESS, DONE, CANCELLED, ON_HOLD, NON_TASK — de los seis statuses que este port registra por
+defecto, `Delegated` (`d`) cae bajo TODO y `Waiting` (`w`) bajo ON_HOLD, ver "Status" en
+`TaskEditWebview.ts` más abajo; cualquier otro status con nombre propio sigue sin UI de
+configuración, así que su `.type` será TODO a menos que se registre a mano), `<due|scheduled|start|done|created|cancelled> before/after/on
 <fecha>` (acepta tanto `start` como `starts`, igual que Obsidian), `no/has <campo> date`,
 `happens before/after/on <fecha>` / `has/no happens date` (pseudo-campo que mira due, scheduled
 y start a la vez, igual que `HappensDateField` del original — útil para queries tipo `(happens
@@ -249,9 +250,17 @@ adicionalmente escapados a una secuencia unicode literal — evita que un `</scr
 dentro de la descripción de una tarea cierre la etiqueta `<script>` antes de tiempo.
 
 **Status** (`status.svelte`'s `StatusEditor` equivalente): el desplegable se rellena con
-`StatusRegistry.getInstance().registeredStatuses` (por defecto solo TODO/IN_PROGRESS/DONE/
-CANCELLED — ver el gotcha de `Config/Settings.ts`/statuses personalizados en la sección de
-`core/Query/Query.ts`). Al cambiar de estado, el webview manda `statusChanged` (símbolo elegido +
+`StatusRegistry.getInstance().registeredStatuses`, que además de TODO/IN_PROGRESS/DONE/CANCELLED
+registra por defecto los dos estados propios de este port (`Status.WAITING` `w` "Waiting" y
+`Status.DELEGATED` `d` "Delegated", en `StatusRegistry.addDefaultStatusTypes()`) — los mismos
+símbolos que `STATUS_ICON_EMOJI`/`STATUS_ICON` ya renderizaban como ⏳/👤 en ambos repos; antes de
+esto, esos dos símbolos se reconocían al mostrarlos pero no eran seleccionables desde este diálogo,
+solo alcanzables escribiendo `[w]`/`[d]` a mano en el markdown. `Status.WAITING` usa
+`StatusType.ON_HOLD` (mismo concepto que el "On Hold" del propio Obsidian Tasks, solo que bajo el
+símbolo que este port ya usaba); `Status.DELEGATED` usa `StatusType.TODO` a falta de un tipo propio
+mejor. Para registrar un status *verdaderamente* personalizado (no de este conjunto fijo) sigue
+haciendo falta el gotcha de `Config/Settings.ts` de la sección `core/Query/Query.ts` de más abajo.
+Al cambiar de estado, el webview manda `statusChanged` (símbolo elegido +
 el texto actual de Done/Cancelled) y el extension host responde `statusDatesUpdated` calculado
 contra una `baselineTask` fija (la tarea existente, o una TODO recién creada si se está creando una
 tarea) vía `baselineTask.handleNewStatus(newStatus)` — mismo cálculo que
@@ -472,7 +481,9 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
   en vez de no-op, expansión de `{{query.file.path}}` y otros placeholders de
   `Scripting/ExpandPlaceholders.ts`)
 - UI de settings real para `Config/Settings.ts` (hoy son valores por defecto fijos) y para
-  registrar statuses personalizados (p. ej. "Delegated") usados en `status.name`/`status.type`
+  registrar statuses verdaderamente personalizados (más allá de los seis — TODO/IN_PROGRESS/DONE/
+  CANCELLED/Waiting/Delegated — que `StatusRegistry.addDefaultStatusTypes()` ya registra por
+  defecto) usados en `status.name`/`status.type`
 - Editor de `On Completion` en `TaskEditWebview.ts` (único campo del modal original que sigue sin
   puerto; ver la sección de `TaskEditWebview.ts` más arriba)
 - Tests automatizados con `@vscode/test-electron` (hoy la validación es manual/smoke-test)

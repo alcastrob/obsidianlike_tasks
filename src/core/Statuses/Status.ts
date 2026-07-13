@@ -36,6 +36,23 @@ export class Status {
         new StatusConfiguration('Q', 'Non-Task', 'A', true, StatusType.NON_TASK),
     );
 
+    /** This port's own "En espera" convention (see CLAUDE.md's "Notas adicionales" section and
+     * `STATUS_ICON_EMOJI`/`STATUS_ICON` in the two consuming repos, which render this symbol as
+     * ⏳). Type ON_HOLD, not a dedicated type of its own — semantically the same concept as
+     * Obsidian Tasks' own `Status.ON_HOLD` ('h'), just under the symbol this port already commits
+     * to. Goes to Done when toggled. */
+    public static readonly WAITING: Status = new Status(
+        new StatusConfiguration('w', 'Waiting', 'x', true, StatusType.ON_HOLD),
+    );
+
+    /** This port's own "Delegada" convention (rendered as 👤 — see `WAITING` above for the same
+     * reasoning). No dedicated StatusType fits "delegated to someone else" any better than TODO
+     * (it's still not personally done), so it uses that rather than adding a new enum value only
+     * this one status would use. Goes to Done when toggled. */
+    public static readonly DELEGATED: Status = new Status(
+        new StatusConfiguration('d', 'Delegated', 'x', true, StatusType.TODO),
+    );
+
     public readonly configuration: StatusConfiguration;
 
     public get symbol(): string {
