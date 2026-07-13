@@ -18,65 +18,7 @@ function relativePath(document: vscode.TextDocument): string {
     return vscode.workspace.asRelativePath(document.uri, false);
 }
 
-interface MarkdownTarget {
-    document: vscode.TextDocument;
-    /** Present only when the document is open in VS Code's native text editor — absent when
-     * the active tab is showing it through a custom editor (e.g. Obsidian-like's CM6 webview),
-     * which VS Code does not expose as a `TextEditor`, so no cursor position is known. */
-    editor?: vscode.TextEditor;
-}
-
-function getActiveMarkdownTabUri(): vscode.Uri | undefined {
-    const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input;
-    if (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom) {
-        if (input.uri.path.toLowerCase().endsWith('.md')) {
-            return input.uri;
-        }
-    }
-    return undefined;
-}
-
-/**
- * Find the markdown document the user is currently looking at, whether it's open in VS Code's
- * native text editor (in which case a cursor position is also available) or in a custom editor
- * like Obsidian-like's (in which case only the underlying document is reachable — `activeTextEditor`
- * is `undefined` for those, since a custom editor's webview is not a `TextEditor`).
- */
-async function resolveActiveMarkdownTarget(): Promise<MarkdownTarget | undefined> {
-    const activeEditor = vscode.window.activeTextEditor;
-    if (activeEditor && activeEditor.document.languageId === 'markdown') {
-        return { document: activeEditor.document, editor: activeEditor };
-    }
-
-    const uri = getActiveMarkdownTabUri();
-    if (!uri) {
-        return undefined;
-    }
-    const document = await vscode.workspace.openTextDocument(uri);
-    return { document };
-}
-
-/**
- * Toggle the status of the task on the cursor's current line (Obsidian Tasks' 'Toggle task
- * done' command). Recurring tasks get their next occurrence inserted alongside the completed
- * one, exactly as `Task.toggleWithRecurrenceInUsersOrder()` decides.
- *
- * Requires a known cursor line, so this only works when the file is open in VS Code's native
- * text editor — if it's open in a custom editor (Obsidian-like), there is no cursor position to
- * read, and the user should toggle the task from that editor's own UI instead.
- */
-export async function toggleTaskAtCursor(): Promise<void> {
-    const target = await resolveActiveMarkdownTarget();
-    if (!target?.editor) {
-        void vscode.window.showInformationMessage(
-            'Tasks: no hay una posición de cursor conocida (el archivo está abierto con un editor personalizado). Usa el checkbox de ese editor, o ábrelo con "Open With → Text Editor".',
-        );
-        return;
-    }
-    await toggleTaskOnLine(target.editor, target.editor.selection.active.line);
-}
-
-/** Same as {@link toggleTaskAtCursor}, but for an explicit line — used by CodeLens actions. */
+/** Used by CodeLens actions (explicit `(editor, line)`, no cursor involved). */
 export async function toggleTaskOnLine(editor: vscode.TextEditor, line: number): Promise<void> {
     const lineText = editor.document.lineAt(line).text;
     const taskLocation = new TaskLocation(relativePath(editor.document), line);
@@ -96,47 +38,14 @@ export async function toggleTaskOnLine(editor: vscode.TextEditor, line: number):
 }
 
 /**
- * Create a new task, or edit the task on the cursor's current line, through the "Create or edit
- * Task" webview dialog.
- *
- * When the active file is open in a custom editor (no known cursor line — see
- * {@link MarkdownTarget}), there is no "current line" to read a task from, so this always creates
- * a new task appended at the end of the document instead. That fallback used to happen silently,
- * which looked indistinguishable from "the dialog should have loaded my existing task but didn't"
- * — the user has no way to tell the two apart just by looking at an empty dialog. Now it warns
- * first, the same way {@link toggleTaskAtCursor} already does for the same underlying limitation.
- *
- * @param getAllTasks Every task currently known across the workspace (from `TaskIndex`), used to
- * seed and search the dialog's Before this/After this fields. Returns `[]` when no workspace
- * folder is open — the dependency fields are simply disabled in that case, same as an empty vault.
- */
-export async function createOrEditTaskAtCursor(getAllTasks: () => Task[]): Promise<void> {
-    const target = await resolveActiveMarkdownTarget();
-    if (!target) {
-        void vscode.window.showInformationMessage('Tasks: open a markdown file first.');
-        return;
-    }
-
-    if (target.editor) {
-        await createOrEditTaskOnLine(target.editor, target.editor.selection.active.line, getAllTasks);
-        return;
-    }
-
-    void vscode.window.showInformationMessage(
-        'Tasks: no hay una posición de cursor conocida (el archivo está abierto con un editor personalizado). Se creará una tarea nueva al final del documento — para editar una tarea existente, ábrela con "Open With → Text Editor" o usa el botón "Edit" de esa tarea si el editor personalizado lo ofrece.',
-    );
-    await createTaskAppendedToDocument(target.document, getAllTasks);
-}
-
-/**
  * Parses `lineText` as a task (if it is one) and shows the "Create or edit Task" dialog seeded
  * from it, returning the resulting {@link Task}(s) — more than one only when completing a
  * recurring task through the Status field spawns its next occurrence, same as the toggle command —
  * or `undefined` if the user cancelled. Shared by every entry point that already has raw line text
- * in hand — the cursor-based command, the CodeLens' explicit-line command, and
- * {@link TasksApi.ts}'s `editTaskAtLocation` (which gets `(path, line)` from Obsidian-like instead
- * of a `vscode.TextEditor`, so it doesn't have a `TaskLocation` computed via `relativePath()` the
- * way the other two do — callers pass one in).
+ * in hand — the CodeLens' explicit-line command and {@link TasksApi.ts}'s `editTaskAtLocation`
+ * (which gets `(path, line)` from Obsidian-like instead of a `vscode.TextEditor`, so it doesn't
+ * have a `TaskLocation` computed via `relativePath()` the way the other one does — callers pass
+ * one in).
  */
 export async function editTaskFromLineText(
     lineText: string,
@@ -157,7 +66,7 @@ export async function editTaskFromLineText(
     );
 }
 
-/** Same as {@link createOrEditTaskAtCursor}, but for an explicit line — used by CodeLens actions. */
+/** Used by CodeLens actions (explicit `(editor, line)`, no cursor involved). */
 export async function createOrEditTaskOnLine(
     editor: vscode.TextEditor,
     line: number,
@@ -174,34 +83,6 @@ export async function createOrEditTaskOnLine(
     await editor.edit((builder) => {
         builder.replace(editor.document.lineAt(line).range, replacement);
     });
-}
-
-/** Prompts for a brand-new task and appends it as a new line (or lines, if it immediately spawns a
- * recurrence — e.g. created with a recurrence rule and the Status field set straight to Done) at
- * the end of `document`. */
-async function createTaskAppendedToDocument(document: vscode.TextDocument, getAllTasks: () => Task[]): Promise<void> {
-    const taskLocation = new TaskLocation(relativePath(document), document.lineCount);
-    const tasks = await promptForTaskFields(
-        null,
-        taskLocation,
-        {
-            seedDescription: '',
-            seedIndentation: '',
-            seedListMarker: '-',
-        },
-        getAllTasks,
-    );
-    if (!tasks) {
-        return;
-    }
-
-    const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
-    const lastLine = document.lineAt(document.lineCount - 1);
-    const prefix = lastLine.text.length > 0 ? eol : '';
-
-    const edit = new vscode.WorkspaceEdit();
-    edit.insert(document.uri, lastLine.range.end, prefix + tasks.map((t) => t.toFileLineString()).join(eol));
-    await vscode.workspace.applyEdit(edit);
 }
 
 /**

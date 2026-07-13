@@ -149,8 +149,8 @@ saldrán truncados — es fiel al comportamiento del plugin original, no un bug 
 
 | Feature | Dónde |
 |---|---|
-| **Toggle de tarea markdown bajo el cursor** (con recurrencia) | comando `tasksManager.toggleTaskLine` (`Ctrl+Enter` en markdown) |
-| **Crear/editar tarea markdown** (descripción, prioridad, fechas, recurrencia) en un diálogo de una sola pantalla, estilo el modal "Create or edit Task" de Obsidian Tasks | comando `tasksManager.createOrEditTask` → `TaskEditWebview.ts` (`WebviewPanel`) — ver detalle abajo |
+| **Toggle de tarea markdown** (con recurrencia), en una línea explícita | comando `tasksManager.toggleTaskAtLine` (`(uri, line)`, disparado por el CodeLens "Done") |
+| **Crear/editar tarea markdown** (descripción, prioridad, fechas, recurrencia) en un diálogo de una sola pantalla, estilo el modal "Create or edit Task" de Obsidian Tasks, en una línea explícita | comando `tasksManager.editTaskAtLine` (`(uri, line)`, disparado por el CodeLens "Edit") → `TaskEditWebview.ts` (`WebviewPanel`) — ver detalle abajo |
 | **CodeLens "Done / Edit / 🔁 regla"** sobre cada línea de tarea | `TaskCodeLensProvider` |
 | **Tachado de completadas + fecha vencida en rojo** en el editor | `TaskDecorations` |
 | **Bloques ` ```tasks ` renderizados en el Preview de Markdown** integrado de VS Code | `markdownTasksPlugin.ts` + `contributes.markdown.markdownItPlugins` |
@@ -283,7 +283,7 @@ hace el resto (equivalente a `EditableTask.applyEdits` del original):
   una tarea recurrente **desde el diálogo** (cambiando Status a Done) genera la siguiente
   ocurrencia igual que el comando de toggle. Por eso `promptForTaskFields`/`editTaskFromLineText`
   devuelven `Task[]` (no un único `Task`) y todos los llamantes (`createOrEditTaskOnLine`,
-  `createTaskAppendedToDocument`, `TasksApi.editTaskAtLocation`) escriben esa lista completa.
+  `TasksApi.editTaskAtLocation`) escriben esa lista completa.
 
 `getAllTasks: () => Task[]` se pasa en cascada desde `extension.ts` (`() =>
 taskIndex?.getAllTasks() ?? []`) hasta `promptForTaskFields`, incluida la vía
@@ -295,59 +295,30 @@ Before this/After this simplemente se muestran deshabilitados (mismo mensaje que
 
 | ID | Descripción |
 |---|---|
-| `tasksManager.toggleTaskLine` | Alterna el estado de la tarea markdown activa: cursor en el editor nativo, o si el archivo está abierto con un editor personalizado (Obsidian-like), avisa de que no hay línea conocida |
-| `tasksManager.createOrEditTask` | Crea o edita una tarea vía el diálogo webview de `TaskEditWebview.ts`. Con editor nativo, edita la línea del cursor; sin él (editor personalizado), avisa y añade una tarea nueva al final del documento — para editar una tarea real en ese caso, el editor personalizado debe llamar a `editTaskAtLocation` (ver "Fase 2") en vez de este comando |
-| `tasksManager.toggleTaskAtLine` / `editTaskAtLine` | Variantes con `(uri, line)` explícitos, usadas por el CodeLens |
+| `tasksManager.toggleTaskAtLine` / `editTaskAtLine` | Variantes con `(uri, line)` explícitos, usadas por el CodeLens ("Done"/"Edit") |
+| `tasksManager.noop` | Target inerte para CodeLenses puramente informativos (p. ej. la insignia de regla de recurrencia) |
 
-Ambos comandos (`toggleTaskLine`, `createOrEditTask`) resuelven el documento activo también
-cuando está abierto con un editor personalizado como Obsidian-like (`resolveActiveMarkdownTarget()`
-en `commands/taskCommands.ts`, vía `vscode.window.tabGroups` en vez de `activeTextEditor`, que
-no existe para editores personalizados) — ver "Fase 2" más abajo para el porqué.
+**Nota histórica — comandos con cursor eliminados**: esta extensión tuvo, hasta hace poco, dos
+comandos adicionales resueltos contra el cursor activo (`tasksManager.toggleTaskLine`,
+`Ctrl+Enter`, y `tasksManager.createOrEditTask`, `Shift+Alt+E`), con su propia lógica en
+`commands/taskCommands.ts` (`resolveActiveMarkdownTarget()`/`getActiveMarkdownTabUri()`) para
+resolver el documento activo incluso cuando estaba abierto con un editor personalizado como
+Obsidian-like (sin cursor conocido en ese caso, avisando y cayendo a "añadir tarea nueva al final"
+para el segundo). Se eliminaron por completo (comandos, keybindings, y todo el código que solo
+ellos usaban) una vez confirmado que, en la práctica, Obsidian-like's `vaultTool.editTaskAtCursor`
+(ver `obsidianlike/CLAUDE.md`) es el único atajo que el usuario usa de verdad — cubre el mismo caso
+para *cualquier* markdown, no solo el que tiene un editor nativo con cursor, así que mantener los
+dos cursor-based de aquí era puro código muerto sin ningún llamador real. Si algún día
+`obsidianlike_tasks` necesita volver a funcionar completamente standalone (sin Obsidian-like
+instalado) con un atajo de teclado propio, este es el punto de partida a resucitar — la lógica
+seguía en git history antes de este cambio.
 
-**Importante**: ninguno de los dos comandos tiene restricción `when` en `menus.commandPalette`
-(se quitó explícitamente) — un `"when": "editorLangId == markdown"` ahí los ocultaría de la
-Command Palette entera cuando el editor activo es uno personalizado, por el mismo motivo que
-`activeTextEditor` no existe en ese caso.
-
-### Atajos de teclado — por qué son dos implementaciones separadas, no una
-
-`package.json`'s `contributes.keybindings` tiene `Ctrl+Enter` → `toggleTaskLine` y
-`Shift+Alt+E` → `createOrEditTask`, ambos con `"when": "editorTextFocus && editorLangId ==
-markdown"`. Ese `when` es *justo* lo que hace que ninguno de los dos se dispare cuando el editor
-activo es el de Obsidian-like: `editorTextFocus` no existe para un `CustomTextEditorProvider`
-ajeno (mismo gotcha de siempre), así que el atajo contribuido aquí simplemente no llega a
-evaluarse como aplicable en ese contexto — no es que se dispare y falle, es que VS Code ni lo
-considera.
-
-**Historial de por qué el atajo cambió dos veces antes de llegar a `Shift+Alt+E`**:
-
-1. La primera versión usaba `Ctrl+Shift+Enter`, que resultó ser el atajo *por defecto* de VS
-   Code para "Insert Line Above" (`editor.action.insertLineBefore`). En el editor nativo esto no
-   daba problemas (una keybinding de extensión gana sobre la de VS Code para el mismo `when`),
-   pero en el editor personalizado de Obsidian-like el síntoma fue que la tecla no hacía
-   absolutamente nada — ni abría el diálogo ni el editor de CodeMirror la recibía siquiera —
-   consistente con un comportamiento documentado de VS Code donde, para un
-   `CustomTextEditorProvider`, la existencia de *cualquier* keybinding registrada para esa
-   combinación de teclas (aunque su `when` no aplique) puede bastar para que la tecla se
-   intercepte antes de llegar al webview, en vez de comprobarse contra el contexto real (ver
-   issues de VS Code `microsoft/vscode#165777` y `microsoft/vscode#241801`).
-2. Se cambió a `Ctrl+Alt+E` — sin choque con VS Code ni con ninguna extensión instalada — pero en
-   un teclado en español (y otros layouts europeos con tecla AltGr: alemán, francés, italiano,
-   portugués, escandinavos, eslavos...) `Ctrl+Alt+<letra>` es **físicamente indistinguible de
-   AltGr+<letra>**: Windows/Chromium reportan AltGr como `ctrlKey=true, altKey=true` simultáneos,
-   exactamente igual que si se hubiera pulsado Ctrl+Alt a mano. En un teclado español, AltGr+E
-   compone el carácter `€`, así que pulsar "Ctrl+Alt+E" tecleaba un euro en vez de disparar el
-   atajo — un problema que no aparece en un teclado US/UK (sin tecla AltGr) pero sí en cualquier
-   layout con ella.
-3. Se fijó `Shift+Alt+E`: ese combo nunca activa la composición de AltGr (que exige Ctrl+Alt
-   simultáneos, no Shift+Alt), y se verificó igualmente contra la referencia oficial de atajos
-   por defecto de VS Code y contra `~/.vscode/extensions/*/package.json` antes de fijarlo.
-
-**Lección para cualquier atajo futuro pensado para un `CustomTextEditorProvider` de otra
-extensión**: además de comprobar que no choque con VS Code ni con otras extensiones, evitar por
-completo el patrón `Ctrl+Alt+<letra>` — o cualquier combo cuyos modificadores coincidan con los
-de AltGr en el layout del usuario — y preferir `Ctrl+Shift+<letra>` o `Shift+Alt+<letra>`, que no
-tienen ese problema en ningún layout conocido.
+**Lección de la investigación original del atajo (`Shift+Alt+E`), por si se resucita**: se probaron
+antes `Ctrl+Shift+Enter` (choca con el atajo por defecto de VS Code "Insert Line Above") y
+`Ctrl+Alt+E` (indistinguible de AltGr+E en teclados con esa tecla — español, alemán, francés... —
+donde compone `€` en vez de disparar el atajo). `Shift+Alt+E` no tiene ninguno de los dos problemas.
+Cualquier atajo futuro pensado para dispararse también dentro de un `CustomTextEditorProvider` de
+otra extensión debería evitar igualmente el patrón `Ctrl+Alt+<letra>` por el mismo motivo.
 
 Se evaluó primero (y se descartó en un primer momento) la idea de que Obsidian-like publicara la
 posición de su cursor a través de su propia API exportada
@@ -414,24 +385,24 @@ submódulo/worktree con este):
    `editTaskAtLocation` devuelven datos vacíos/no-op si no hay workspace folder abierto (nada que
    indexar), no un error.
 
-   **`editTaskAtLocation` existe específicamente por esto**: el comando
-   `tasksManager.createOrEditTask` de esta extensión (basado en el cursor de
-   `vscode.window.activeTextEditor`) no tiene forma de saber en qué línea estaba el usuario cuando
-   la pestaña activa muestra el fichero a través del editor personalizado de **otra** extensión —
-   VS Code no expone la posición del cursor de un `CustomTextEditorProvider` ajeno. Antes, ese caso
-   caía silenciosamente a "crear una tarea nueva al final del documento" (ahora al menos avisa con
-   un mensaje, ver `createOrEditTaskAtCursor` en `commands/taskCommands.ts`), pero seguía sin poder
-   editar la tarea real que el usuario tenía delante. Obsidian-like, en cambio, sí sabe exactamente
-   qué tarea pulsó el usuario en su propio webview (igual que ya sabe lo suficiente para llamar a
-   `toggleTaskAtLocation`) — así que su UI de "editar tarea" llama a `editTaskAtLocation(path,
-   line)` en vez de (o antes de) invocar el comando de la paleta.
+   **`editTaskAtLocation` existe específicamente por esto**: VS Code no expone la posición del
+   cursor de un `CustomTextEditorProvider` ajeno, así que ningún comando *de esta extensión* puede
+   saber en qué línea estaba el usuario cuando el fichero está abierto con el editor personalizado
+   de **otra** extensión. Obsidian-like, en cambio, sí sabe exactamente qué tarea tenía el usuario
+   delante en su propio webview (igual que ya sabe lo suficiente para llamar a
+   `toggleTaskAtLocation`) — así que su propia UI llama a `editTaskAtLocation(path, line)`
+   directamente, sin pasar por ningún comando de la paleta de esta extensión (que, de hecho, ya no
+   tiene ningún comando cursor-based que ofrecer para ese caso — ver la nota histórica en
+   "Comandos registrados" más arriba).
 
-   **Cableado del lado de `c:\git\obsidianlike` (implementado)**: cada checkbox de tarea —
-   tanto en línea (`TaskCheckboxWidget`) como en filas de resultados de un bloque ` ```tasks ` —
-   muestra un botón ✏️ junto al checkbox (`.cm-task-edit-btn` / `.cm-task-query-edit-btn`) que
-   envía `{ type: 'edit-task', line }` o `{ type: 'edit-task-at-location', path, line }` al
-   extension host de Obsidian-like, el cual llama a `editTaskAtLocation`. Detalle completo en la
-   sección "Editing a task" del `CLAUDE.md` de ese repo.
+   **Cableado del lado de `c:\git\obsidianlike` (implementado)**: el atajo de teclado
+   `vaultTool.editTaskAtCursor` (`Shift+Alt+E`, cubre el caso "tarea en el documento actualmente
+   abierto") y, en las filas de resultado de un bloque ` ```tasks ` (que pueden apuntar a
+   *cualquier* fichero del vault, sin cursor al que recurrir), un botón ✏️ propio por fila
+   (`.cm-task-query-edit-btn`) que envía `{ type: 'edit-task-at-location', path, line }` al
+   extension host de Obsidian-like, el cual llama a `editTaskAtLocation`. Detalle completo en las
+   secciones "```tasks``` query blocks" y "Keyboard shortcut for 'edit task at cursor'" del
+   `CLAUDE.md` de ese repo.
 
 ### Scripts npm
 

@@ -1,10 +1,5 @@
 import * as vscode from 'vscode';
-import {
-  toggleTaskAtCursor,
-  toggleTaskOnLine,
-  createOrEditTaskAtCursor,
-  createOrEditTaskOnLine,
-} from './commands/taskCommands';
+import { toggleTaskOnLine, createOrEditTaskOnLine } from './commands/taskCommands';
 import { TaskCodeLensProvider } from './TaskCodeLensProvider';
 import { TaskDecorations } from './TaskDecorations';
 import { TaskIndex } from './TaskIndex';
@@ -40,12 +35,6 @@ export async function activate(context: vscode.ExtensionContext) {
   // These only need the currently open document — no workspace folder required, so they work
   // even when a single .md file is opened directly (File > Open File) rather than a folder.
   context.subscriptions.push(
-    vscode.commands.registerCommand('tasksManager.toggleTaskLine', () => {
-      void toggleTaskAtCursor();
-    }),
-    vscode.commands.registerCommand('tasksManager.createOrEditTask', () => {
-      void createOrEditTaskAtCursor(() => taskIndex?.getAllTasks() ?? []);
-    }),
     vscode.commands.registerCommand('tasksManager.toggleTaskAtLine', async (uri: vscode.Uri, line: number) => {
       const editor = await vscode.window.showTextDocument(uri, { preserveFocus: true });
       await toggleTaskOnLine(editor, line);

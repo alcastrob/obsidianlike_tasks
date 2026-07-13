@@ -19,28 +19,6 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
-      {
-        "command": "tasksManager.toggleTaskLine",
-        "title": "Obsidian-like Tasks: Toggle Task Done"
-      },
-      {
-        "command": "tasksManager.createOrEditTask",
-        "title": "Obsidian-like Tasks: Create or Edit Task"
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "tasksManager.toggleTaskLine",
-        "key": "ctrl+enter",
-        "when": "editorTextFocus && editorLangId == markdown"
-      },
-      {
-        "command": "tasksManager.createOrEditTask",
-        "key": "shift+alt+e",
-        "when": "editorTextFocus && editorLangId == markdown"
-      }
-    ],
     "markdown": {
       "markdownItPlugins": true,
       "previewStyles": [
