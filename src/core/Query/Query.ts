@@ -190,8 +190,21 @@ export class TasksQuery {
     private limitCount: number | null = null;
     public readonly unrecognizedLines: string[] = [];
 
-    constructor(source: string) {
-        for (const rawLine of source.split('\n')) {
+    /**
+     * @param queryFilePath Workspace-relative path (same format as `Task.path`) of the note
+     * *containing* this ` ```tasks ``` ` block, if known — expands `{{query.file.path}}` in the
+     * query source to it before parsing, mirroring `Scripting/ExpandPlaceholders.ts` in the
+     * original plugin. Typically used as `path does not include {{query.file.path}}` to exclude
+     * the query's own note from its results. Left `undefined` by a caller that doesn't know (or
+     * can't cheaply know) which file the block lives in — the placeholder then survives as
+     * literal text, compared like any other string (never matches a real path, so `does not
+     * include` silently keeps every result instead of excluding the query's own note — the
+     * pre-existing behaviour before this parameter existed).
+     */
+    constructor(source: string, queryFilePath?: string) {
+        const expandedSource =
+            queryFilePath !== undefined ? source.replace(/\{\{\s*query\.file\.path\s*\}\}/g, queryFilePath) : source;
+        for (const rawLine of expandedSource.split('\n')) {
             const line = rawLine.trim();
             if (line === '' || line.startsWith('#')) {
                 continue;
@@ -519,16 +532,30 @@ export class TasksQuery {
         return compileFilterFunction(match[1]);
     }
 
+    /** Accepts either one field per `sort by` line (multiple lines apply in order, as tie-break
+     * criteria — the original multi-line form) or a comma-separated list on a single line
+     * (`sort by priority, due`), applied in the same left-to-right tie-break order. Any invalid
+     * segment fails the whole line (same as before — falls through to "unrecognized line" rather
+     * than silently applying a partial sort). */
     private parseSortBy(line: string): boolean {
-        const match = line.match(/^sort by (\w+)(?: date)?( reverse)?$/i);
-        if (!match) {
+        const prefixMatch = line.match(/^sort by (.+)$/i);
+        if (!prefixMatch) {
             return false;
         }
-        const field = this.toSortableField(match[1]);
-        if (field === null) {
-            return false;
+        const segments = prefixMatch[1].split(',').map((segment) => segment.trim());
+        const instructions: SortInstruction[] = [];
+        for (const segment of segments) {
+            const match = segment.match(/^(\w+)(?: date)?( reverse)?$/i);
+            if (!match) {
+                return false;
+            }
+            const field = this.toSortableField(match[1]);
+            if (field === null) {
+                return false;
+            }
+            instructions.push({ field, reverse: match[2] !== undefined });
         }
-        this.sortInstructions.push({ field, reverse: match[2] !== undefined });
+        this.sortInstructions.push(...instructions);
         return true;
     }
 

@@ -71,8 +71,13 @@ export interface TasksExtensionApi {
      * every task in the workspace, and return the result as plain data — not HTML — so the
      * caller can render it with its own styling. Empty/all-zero result if no workspace folder
      * is open or the task index hasn't finished its initial scan yet.
+     *
+     * @param queryFilePath Workspace-relative path of the note containing this query block, if
+     * the caller knows it — expands `{{query.file.path}}` in the query text (see
+     * {@link TasksQuery}'s constructor). Optional so this still works for a caller that doesn't
+     * track which file a query came from; the placeholder then just isn't expanded.
      */
-    renderTasksQuery(queryText: string): TasksQueryResultDTO;
+    renderTasksQuery(queryText: string, queryFilePath?: string): TasksQueryResultDTO;
 
     /**
      * Toggle the task at `line` (0-based) in the file at `path` (workspace-relative), which may
@@ -160,13 +165,13 @@ export function createTasksApi(
             return task.toggleWithRecurrenceInUsersOrder().map((t) => t.toFileLineString());
         },
 
-        renderTasksQuery(queryText: string): TasksQueryResultDTO {
+        renderTasksQuery(queryText: string, queryFilePath?: string): TasksQueryResultDTO {
             const taskIndex = getTaskIndex();
             if (!taskIndex) {
                 return { items: [], groups: null, unrecognizedLines: [] };
             }
 
-            const query = new TasksQuery(queryText);
+            const query = new TasksQuery(queryText, queryFilePath);
             const result = query.apply(taskIndex.getAllTasks());
 
             return {

@@ -127,18 +127,25 @@ fecha de vencimiento, recurrencia, ruta) y no tiene todavía toggles por campo. 
 reconocerlas es solo no reportarlas como "línea no reconocida"; un nombre de campo inventado
 (`hide foobar`) sigue detectándose como tal.
 
-**Limitación conocida, no arreglada todavía**: el placeholder `{{query.file.path}}` (típico en
-`path does not include {{query.file.path}}` para excluir la nota que contiene la query) **no**
-se expande — se compara como texto literal, así que ese filtro nunca excluye nada y la query
-devuelve más resultados de los esperados, sin avisar con una línea no reconocida. Arreglarlo
-requiere pasar la ruta del fichero que contiene el bloque ` ```tasks ``` ` hasta `TasksQuery`
-(hoy ni `registerTasksCodeBlock` en `markdownTasksPlugin.ts` ni `renderTasksQuery` en
-`TasksApi.ts` la reciben) — pendiente.
+`{{query.file.path}}` (típico en `path does not include {{query.file.path}}` para excluir la nota
+que contiene la query) se expande a la ruta relativa del fichero que contiene el bloque —
+`TasksQuery`'s constructor acepta un segundo parámetro opcional `queryFilePath` y hace un
+`replace` sobre el texto de la query *antes* de parsear línea a línea, igual que
+`Scripting/ExpandPlaceholders.ts` del original. **Solo conectado del lado de Obsidian-like**: su
+handler de `run-tasks-query` en `extension.ts` ya tiene `document.uri` en su closure (lo usa para
+otras cosas), así que le pasa `vscode.workspace.asRelativePath(document.uri, false)` como tercer
+argumento a `renderTasksQuery` sin round-trip adicional. **`registerTasksCodeBlock` (Preview
+nativo de VS Code, `markdownTasksPlugin.ts`) sigue sin pasarlo** — el renderer de `fence` de
+markdown-it recibe un `env` cuyo contenido para el documento actual no está verificado de forma
+fiable entre versiones de VS Code, así que esa superficie se dejó tal cual (placeholder literal,
+sin expandir) en vez de arriesgar una implementación no probada; sigue pendiente si hace falta.
 
-`sort by <campo> [reverse]` acepta múltiples líneas (se aplican en orden, como criterio de
-desempate). `group by <campo>` soporta los campos nombrados de siempre, y **`group by function
-<expresión JS>`**, que puede devolver un array para que una tarea aparezca en varios grupos a la
-vez (p. ej. `task.tags.map(...)`) — igual que el original.
+`sort by <campo> [reverse]` acepta tanto **varias líneas** (se aplican en orden, como criterio de
+desempate) como **una sola línea con varios campos separados por comas** (`sort by priority, due`,
+mismo orden de desempate que escribirlas en líneas separadas — cualquier segmento inválido
+invalida la línea entera, igual que antes). `group by <campo>` soporta los campos nombrados de
+siempre, y **`group by function <expresión JS>`**, que puede devolver un array para que una tarea
+aparezca en varios grupos a la vez (p. ej. `task.tags.map(...)`) — igual que el original.
 
 **Limitación heredada del propio Obsidian Tasks, no introducida aquí**: `TaskRegularExpressions.hashTags`
 corta un tag en el primer espacio, así que un tag `#[[Project Uno]]` con espacio se parsea como
@@ -512,8 +519,10 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
 
 - Ampliar `core/Query/Query.ts` hacia la paridad completa del DSL original (`urgency` como
   criterio de orden por defecto, `sort by function`, toggles reales de layout para `hide`/`show`
-  en vez de no-op, expansión de `{{query.file.path}}` y otros placeholders de
-  `Scripting/ExpandPlaceholders.ts`)
+  en vez de no-op, expansión de otros placeholders de `Scripting/ExpandPlaceholders.ts` más allá
+  de `{{query.file.path}}`, que ya se soporta)
+- Expandir `{{query.file.path}}` también en el Preview nativo de VS Code (`registerTasksCodeBlock`
+  en `markdownTasksPlugin.ts`) — hoy solo funciona desde el editor de Obsidian-like
 - UI de settings real para `Config/Settings.ts` (hoy son valores por defecto fijos) y para
   registrar statuses verdaderamente personalizados (más allá de los seis — TODO/IN_PROGRESS/DONE/
   CANCELLED/Waiting/Delegated — que `StatusRegistry.addDefaultStatusTypes()` ya registra por
