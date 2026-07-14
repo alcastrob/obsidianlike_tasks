@@ -54,6 +54,29 @@ export interface TaskFormContext {
     taskLocation: TaskLocation;
 }
 
+/** A note the description field's `[[wikilink]]` suggester can offer — mirrors the
+ * `{ name, dir }` shape Obsidian-like's own `noteIndex` uses, for a consistent suggestion list
+ * regardless of which editor the task happens to be edited from. */
+interface NoteIndexEntry {
+    name: string;
+    dir: string;
+}
+
+/** Same glob/exclude pair `TaskIndex.ts` uses to scan the workspace for markdown files — kept
+ * separate (not imported from there) since `TaskIndex` is purpose-built for parsing *tasks* out
+ * of files, not listing note names, and re-scanning here is simpler than adding an unrelated
+ * "list every note" API to that class for a single caller. */
+async function findAllNoteNames(): Promise<NoteIndexEntry[]> {
+    const uris = await vscode.workspace.findFiles('**/*.md', '**/{node_modules,.git,out}/**');
+    return uris.map((uri) => {
+        const relPath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+        const slash = relPath.lastIndexOf('/');
+        const filename = slash === -1 ? relPath : relPath.slice(slash + 1);
+        const dir = slash === -1 ? '' : relPath.slice(0, slash);
+        return { name: filename.replace(/\.md$/i, ''), dir };
+    });
+}
+
 const PRIORITY_GRID: Array<{ priority: Priority; label: string; icon: string }> = [
     { priority: Priority.Lowest, label: 'Lowest', icon: '⏬' },
     { priority: Priority.Low, label: 'Low', icon: '🔽' },
@@ -153,11 +176,18 @@ function setStatusRelatedDate(currentText: string, isInStatus: boolean, editedDa
  * Before this/After this search and the Status-change date preview also run here, against
  * `context.allTasks`, for the same reason (the webview has no access to the task index).
  */
-export function showTaskEditDialog(
+export async function showTaskEditDialog(
     seed: TaskFormSeed,
     isEditing: boolean,
     context: TaskFormContext,
 ): Promise<TaskFormResult | undefined> {
+    // Awaited before the panel/HTML is built so the `[[wikilink]]` suggester in the description
+    // field has its candidate list from the very first paint, matching how `context.allTasks` is
+    // already available upfront rather than fetched lazily — one findFiles() scan per dialog-open
+    // is cheap enough (VS Code serves it from its own file-watcher index, not a fresh disk walk)
+    // to not need caching across calls the way TaskIndex caches parsed tasks.
+    const noteIndex = await findAllNoteNames();
+
     return new Promise((resolve) => {
         // `ViewColumn.Active` used to be here, but that replaces the active tab in place — the
         // document being edited disappears behind the dialog instead of staying visible, since a
@@ -185,7 +215,7 @@ export function showTaskEditDialog(
             panel.dispose();
         };
 
-        panel.webview.html = renderHtml(panel.webview, seed, isEditing, context);
+        panel.webview.html = renderHtml(panel.webview, seed, isEditing, context, noteIndex);
 
         panel.webview.onDidReceiveMessage((message: any) => {
             switch (message?.type) {
@@ -358,7 +388,13 @@ export function showTaskEditDialog(
     });
 }
 
-function renderHtml(webview: vscode.Webview, seed: TaskFormSeed, isEditing: boolean, context: TaskFormContext): string {
+function renderHtml(
+    webview: vscode.Webview,
+    seed: TaskFormSeed,
+    isEditing: boolean,
+    context: TaskFormContext,
+    noteIndex: NoteIndexEntry[],
+): string {
     const cspNonce = nonce();
 
     const statusOptions = StatusRegistry.getInstance().registeredStatuses;
@@ -392,6 +428,7 @@ function renderHtml(webview: vscode.Webview, seed: TaskFormSeed, isEditing: bool
         initialBlockedBy,
         initialBlocking,
         hasVaultTasks,
+        noteIndex,
     });
 
     const priorityRadios = PRIORITY_GRID.map(
@@ -553,6 +590,35 @@ function renderHtml(webview: vscode.Webview, seed: TaskFormSeed, isEditing: bool
         background: var(--vscode-list-hoverBackground);
     }
     .dependency-dropdown li .dep-path { opacity: 0.65; margin-left: 6px; font-size: 0.9em; }
+    .description-field { position: relative; }
+    .wikilink-dropdown {
+        list-style: none;
+        margin: 0;
+        padding: 4px;
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+        border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+        border-radius: 4px;
+        position: absolute;
+        min-width: 220px;
+        max-width: 380px;
+        z-index: 20;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+    .wikilink-dropdown li {
+        padding: 6px 8px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 0.92em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .wikilink-dropdown li.selected, .wikilink-dropdown li:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+    .wikilink-dropdown li .wikilink-dir { opacity: 0.65; margin-left: 6px; font-size: 0.9em; }
     .actions { display: flex; gap: 10px; margin-top: 24px; }
     button {
         flex: 1;
@@ -584,7 +650,10 @@ function renderHtml(webview: vscode.Webview, seed: TaskFormSeed, isEditing: bool
 
     <div class="field">
         <label class="field-label" for="description">Description</label>
-        <textarea id="description">${escapeHtml(seed.description)}</textarea>
+        <div class="description-field">
+            <textarea id="description">${escapeHtml(seed.description)}</textarea>
+            <ul class="wikilink-dropdown" id="description-wikilink-dropdown" hidden></ul>
+        </div>
     </div>
 
     <div class="field">
@@ -676,6 +745,185 @@ function renderHtml(webview: vscode.Webview, seed: TaskFormSeed, isEditing: bool
     const doneEl = document.getElementById('done');
     const cancelledEl = document.getElementById('cancelled');
     const errorEl = document.getElementById('error');
+
+    // ---- [[wikilink]] suggester for the description field ----
+    // Ported from Obsidian-like's own WikiSuggestView (webview-src/editor.js, CM6-based — see its
+    // CLAUDE.md) — same trigger regex, same candidate-matching/ranking, same keyboard/click
+    // wiring, but this is a plain \`<textarea>\`, not CodeMirror, so there's no \`coordsAtPos()\` to
+    // ask "where is character N on screen" — that's the one genuinely new piece here, done via
+    // the standard "mirror div" technique (clone the textarea's text/font metrics into a hidden
+    // div, insert a marker span at the caret offset, read its offsetLeft/offsetTop).
+    (function () {
+        const noteIndex = initial.noteIndex || [];
+        const dropdown = document.getElementById('description-wikilink-dropdown');
+        const WIKI_TRIGGER_RE = /\\[\\[([^\\]\\n]*)$/;
+        const MAX_SUGGESTIONS = 5;
+
+        let openBracketFrom = -1;
+        let items = [];
+        let selected = -1;
+        let dismissedKey = null;
+
+        function matchNotes(query) {
+            const q = query.trim().toLowerCase();
+            if (!q) {
+                return noteIndex.slice(0, MAX_SUGGESTIONS);
+            }
+            const scored = [];
+            for (const note of noteIndex) {
+                const name = note.name.toLowerCase();
+                const idx = name.indexOf(q);
+                if (idx === -1) continue;
+                scored.push({ note: note, idx: idx, startsWith: idx === 0 });
+            }
+            scored.sort((a, b) => {
+                if (a.startsWith !== b.startsWith) return a.startsWith ? -1 : 1;
+                if (a.idx !== b.idx) return a.idx - b.idx;
+                return a.note.name.localeCompare(b.note.name);
+            });
+            return scored.slice(0, MAX_SUGGESTIONS).map((s) => s.note);
+        }
+
+        const MIRROR_PROPS = [
+            'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+            'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+            'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight',
+            'textTransform', 'wordSpacing',
+        ];
+        function caretCoordinates(textarea, position) {
+            const mirror = document.createElement('div');
+            const style = getComputedStyle(textarea);
+            MIRROR_PROPS.forEach((prop) => { mirror.style[prop] = style[prop]; });
+            mirror.style.position = 'absolute';
+            mirror.style.visibility = 'hidden';
+            mirror.style.whiteSpace = 'pre-wrap';
+            mirror.style.wordWrap = 'break-word';
+            mirror.style.top = '0';
+            mirror.style.left = '-9999px';
+            mirror.style.height = 'auto';
+            document.body.appendChild(mirror);
+            mirror.textContent = textarea.value.substring(0, position);
+            const marker = document.createElement('span');
+            marker.textContent = textarea.value.substring(position) || '.';
+            mirror.appendChild(marker);
+            const left = marker.offsetLeft;
+            const top = marker.offsetTop;
+            const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
+            document.body.removeChild(mirror);
+            return { left: left, top: top, lineHeight: lineHeight };
+        }
+
+        function currentContext() {
+            const pos = descriptionEl.selectionStart;
+            if (pos !== descriptionEl.selectionEnd) return null;
+            const before = descriptionEl.value.slice(0, pos);
+            const match = WIKI_TRIGGER_RE.exec(before);
+            if (!match) return null;
+            return { openBracketFrom: pos - match[0].length, query: match[1], pos: pos };
+        }
+
+        function render() {
+            if (items.length === 0) {
+                dropdown.hidden = true;
+                return;
+            }
+            dropdown.innerHTML = '';
+            items.forEach((note, i) => {
+                const li = document.createElement('li');
+                li.className = i === selected ? 'selected' : '';
+                const title = document.createElement('span');
+                title.textContent = note.name;
+                li.appendChild(title);
+                if (note.dir) {
+                    const dir = document.createElement('span');
+                    dir.className = 'wikilink-dir';
+                    dir.textContent = note.dir;
+                    li.appendChild(dir);
+                }
+                li.dataset.index = String(i);
+                dropdown.appendChild(li);
+            });
+            const coords = caretCoordinates(descriptionEl, openBracketFrom);
+            dropdown.style.left = coords.left + 'px';
+            dropdown.style.top = (coords.top + coords.lineHeight) + 'px';
+            dropdown.hidden = false;
+        }
+
+        function close() {
+            openBracketFrom = -1;
+            items = [];
+            selected = -1;
+            dropdown.hidden = true;
+        }
+
+        function dismiss() {
+            const ctx = currentContext();
+            if (ctx) dismissedKey = ctx.openBracketFrom + ':' + ctx.query;
+            close();
+        }
+
+        function recompute() {
+            const ctx = currentContext();
+            if (!ctx) { close(); return; }
+            const key = ctx.openBracketFrom + ':' + ctx.query;
+            if (dismissedKey === key) return;
+            dismissedKey = null;
+            openBracketFrom = ctx.openBracketFrom;
+            items = matchNotes(ctx.query);
+            selected = items.length > 0 ? 0 : -1;
+            render();
+        }
+
+        function accept(index) {
+            const i = index === undefined ? selected : index;
+            if (i < 0 || i >= items.length) return;
+            const note = items[i];
+            const pos = descriptionEl.selectionStart;
+            let to = pos;
+            if (descriptionEl.value.slice(pos, pos + 2) === ']]') to += 2;
+            const insertText = '[[' + note.name + ']]';
+            descriptionEl.value = descriptionEl.value.slice(0, openBracketFrom) + insertText + descriptionEl.value.slice(to);
+            const newPos = openBracketFrom + insertText.length;
+            descriptionEl.setSelectionRange(newPos, newPos);
+            descriptionEl.focus();
+            close();
+        }
+
+        descriptionEl.addEventListener('input', recompute);
+        descriptionEl.addEventListener('click', recompute);
+        descriptionEl.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') recompute();
+        });
+        descriptionEl.addEventListener('blur', () => {
+            // Delayed so a dropdown mousedown (which calls preventDefault, but blur can still
+            // fire first in some browsers) has a chance to run its click handler before the
+            // dropdown gets torn down.
+            setTimeout(close, 150);
+        });
+        descriptionEl.addEventListener('keydown', (e) => {
+            if (dropdown.hidden) return;
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                dismiss();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selected = items.length ? (selected + 1) % items.length : -1;
+                render();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selected = items.length ? (selected - 1 + items.length) % items.length : -1;
+                render();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                accept();
+            }
+        });
+        dropdown.addEventListener('mousedown', (e) => e.preventDefault());
+        dropdown.addEventListener('click', (e) => {
+            const li = e.target.closest('li');
+            if (li) accept(Number(li.dataset.index));
+        });
+    })();
 
     // Resolving free text like "today"/"next monday" to an absolute date needs chrono-node,
     // which isn't bundled for the webview, so the picker is kept in sync via a debounced

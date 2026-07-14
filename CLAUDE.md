@@ -300,6 +300,40 @@ taskIndex?.getAllTasks() ?? []`) hasta `promptForTaskFields`, incluida la vía
 Before this/After this simplemente se muestran deshabilitados (mismo mensaje que el original:
 "Blocking and blocked by fields are disabled...").
 
+**Sugeridor de `[[wikilinks]]` en el campo Description**: port del `WikiSuggestView` de
+Obsidian-like (`webview-src/editor.js` de ese repo, CM6-based — mismo `WIKI_TRIGGER_RE =
+/\[\[([^\]\n]*)$/`, mismo criterio de filtrado/orden: coincidencia de subcadena case-insensitive,
+`startsWith` primero, luego alfabético, tope de 5 resultados), pero adaptado a un `<textarea>`
+plano sin CodeMirror:
+- **Candidatos**: `findAllNoteNames()` (nuevo, en `TaskEditWebview.ts`) escanea el workspace con
+  `vscode.workspace.findFiles('**/*.md', '**/{node_modules,.git,out}/**')` — mismo glob/exclude
+  que `TaskIndex.ts` usa para tareas, pero sin reutilizar esa clase (está pensada para parsear
+  *tareas*, no para listar nombres de nota; una clase nueva de una sola responsabilidad era más
+  simple que añadirle una API no relacionada). Se ejecuta una vez al abrir el diálogo
+  (`showTaskEditDialog` ahora es `async` para poder esperarlo) y viaja entero en el JSON inicial
+  del webview (`initial.noteIndex`, forma `{ name, dir }[]`, igual que el `noteIndex` de
+  Obsidian-like) — el filtrado por cada pulsación es síncrono en el propio cliente, sin
+  round-trip, igual que en la versión CM6 (a diferencia de la búsqueda de dependencias de
+  arriba, que sí hace un round-trip por pulsación).
+- **Posicionamiento del popup — la única pieza genuinamente nueva**: CM6 resuelve "¿dónde está el
+  carácter N en pantalla?" con `coordsAtPos()`; un `<textarea>` no tiene ningún equivalente
+  nativo. Se usa la técnica estándar del "mirror div": un `<div>` oculto absolutamente
+  posicionado clona las propiedades de fuente/caja del textarea (`font*`, `padding*`,
+  `border*Width`, `lineHeight`, `whiteSpace: pre-wrap`, `wordWrap: break-word`), se le mete el
+  texto hasta la posición del cursor seguido de un `<span>` marcador, y se lee el
+  `offsetLeft`/`offsetTop` de ese marcador — todo lo demás (construcción de la lista, resaltado,
+  navegación con flechas, click-to-select) es JS/DOM genérico portado prácticamente literal desde
+  `WikiSuggestView`. Verificado con una página de prueba aislada en Chrome headless (mismo
+  `<textarea>` + `<ul>` + este JS, sin VS Code de por medio): escribir `[[Hab` filtra y posiciona
+  el popup correctamente pegado al cursor, y `ArrowDown` + `Enter` inserta `[[Nota]]` en el sitio
+  exacto, respetando un `]]` ya existente justo después del cursor (mismo criterio que
+  `accept()` en la versión CM6).
+- **No incluye modo de encabezados** (`[[Nota#Sección`) — a diferencia de la versión CM6, que
+  tras un `#` cambia a listar encabezados de esa nota concreta vía un round-trip `get-headings`.
+  Aquí se paró en el caso más común (enlazar a una nota completa) por alcance/tiempo; añadir el
+  modo de encabezados sería un round-trip nuevo similar a `searchDependency` de arriba, no un
+  cambio de arquitectura.
+
 ### Comandos registrados
 
 | ID | Descripción |

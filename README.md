@@ -8,7 +8,7 @@ Extensión de VS Code que porta el plugin [Tasks](https://github.com/obsidian-ta
 
 - **Formato idéntico al de Obsidian**: `- [ ] Comprar leche 📅 2024-01-15 ⏫ 🔁 every week` — mismos emojis, mismas reglas de fecha/prioridad/recurrencia.
 - **Alternar el estado de una tarea** con recurrencia: al completar una tarea recurrente, se crea automáticamente la siguiente ocurrencia con la fecha avanzada.
-- **Crear o editar una tarea** mediante un diálogo de una sola pantalla, estilo el modal "Create or edit Task" de Obsidian Tasks: descripción, prioridad, fecha límite/programada/inicio, recurrencia con vista previa en vivo, estado (desplegable), fechas de creación/hecho/cancelado, y dependencias "Before this"/"After this" con búsqueda entre todas las tareas del vault — acepta fechas relativas como "today" o "next monday".
+- **Crear o editar una tarea** mediante un diálogo de una sola pantalla, estilo el modal "Create or edit Task" de Obsidian Tasks: descripción (con sugeridor de `[[wikilinks]]` al escribir `[[`, buscando entre todas las notas del vault), prioridad, fecha límite/programada/inicio, recurrencia con vista previa en vivo, estado (desplegable), fechas de creación/hecho/cancelado, y dependencias "Before this"/"After this" con búsqueda entre todas las tareas del vault — acepta fechas relativas como "today" o "next monday".
 - **CodeLens** ("Done" / "Edit" / regla de recurrencia) sobre cada línea de tarea en el editor.
 - **Resaltado visual**: tachado para las tareas hechas, color rojo para las fechas vencidas.
 - **Bloques de consulta** ` ```tasks ```, con una sintaxis muy cercana a la del plugin original:
