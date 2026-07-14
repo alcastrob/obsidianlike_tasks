@@ -62,6 +62,26 @@ code --install-extension obsidian-like-tasks-<versión>.vsix
 
 Para depurar: abrir esta carpeta en VS Code y pulsar **F5** (lanza un Extension Development Host).
 
+## Seguridad y privacidad
+
+Esta extensión no hace ninguna llamada de red por sí misma: sin telemetría, sin analítica, sin
+"phone home" de ningún tipo. Verificado revisando todo `src/`, el compilado `out/`, y sus tres
+únicas dependencias en tiempo de ejecución (`chrono-node`, `moment`, `rrule`) en busca de
+`fetch`/`XMLHttpRequest`/`http(s).request`/`WebSocket`/`child_process` y de cualquier SDK de
+telemetría — nada de eso aparece en ningún sitio. El diálogo "Create or edit Task" (el único
+webview de la extensión) además tiene una CSP estricta (`default-src 'none'`), así que ni siquiera
+permite cargar nada externo aunque algo lo intentara.
+
+**Salvedad**: `filter by function <expresión JS>` / `group by function <expresión JS>` en un
+bloque ` ```tasks ``` ` evalúa esa expresión con `new Function(...)` en el contexto Node.js
+completo del extension host, sin sandboxing — es un port deliberado de la misma funcionalidad de
+scripting del plugin original de Obsidian (ver el docstring de `ScriptingTaskView.ts`). Esto
+significa que ese código sí podría, en principio, hacer llamadas de red o ejecutar comandos —
+pero solo a partir de contenido que ya está en un fichero abierto de tu propio workspace, nunca
+desde entrada de red externa. El riesgo real es abrir una bóveda sincronizada desde una fuente no
+confiable (una plantilla descargada, un vault compartido) cuyo bloque `tasks` contenga una
+expresión de este tipo.
+
 ## Limitaciones conocidas frente al plugin original
 
 - No hay UI de configuración (los ajustes de comportamiento — fechas automáticas al completar, orden de recurrencia, etc. — usan los valores por defecto de Obsidian Tasks, fijos en código).
