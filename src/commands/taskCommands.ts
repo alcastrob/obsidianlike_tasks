@@ -74,8 +74,15 @@ export async function createOrEditTaskOnLine(
 ): Promise<void> {
     const lineText = editor.document.lineAt(line).text;
     const taskLocation = new TaskLocation(relativePath(editor.document), line);
+    // The "Create or edit Task" dialog opens as its own tab beside this one and steals focus for
+    // as long as it's open — restoring the viewport explicitly afterwards (Apply or Cancel) avoids
+    // relying on VS Code to leave a background editor's scroll position untouched on its own.
+    const visibleRange = editor.visibleRanges[0];
     const tasks = await editTaskFromLineText(lineText, taskLocation, getAllTasks);
     if (!tasks) {
+        if (visibleRange) {
+            editor.revealRange(visibleRange, vscode.TextEditorRevealType.AtTop);
+        }
         return;
     }
 
@@ -83,6 +90,9 @@ export async function createOrEditTaskOnLine(
     await editor.edit((builder) => {
         builder.replace(editor.document.lineAt(line).range, replacement);
     });
+    if (visibleRange) {
+        editor.revealRange(visibleRange, vscode.TextEditorRevealType.AtTop);
+    }
 }
 
 /**

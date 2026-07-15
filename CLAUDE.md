@@ -240,6 +240,30 @@ más cerca que permite `WebviewPanel` de un modal flotante real. Al cargar, el f
 `setSelectionRange`, al final del `<script>` del webview), para poder empezar a escribir sin un
 clic previo.
 
+**Esc cierra el diálogo si la descripción está vacía**: un listener `keydown` a nivel de
+`document` (al final del `<script>`, junto al resto del cableado de botones) manda `{ type:
+'cancel' }` cuando `e.key === 'Escape'` y `descriptionEl.value.trim() === ''` — sin necesidad de
+bajar hasta el botón Cancel. Deliberadamente **no** cierra con Esc si ya hay texto escrito, para no
+perder una descripción a medio escribir por un Esc accidental; ese es también el único campo que se
+mira, porque es el único obligatorio (Apply ya rechaza una descripción vacía). No colisiona con los
+otros handlers de Esc del propio diálogo (el desplegable de `[[wikilink]]`, la búsqueda de
+dependencias) — ninguno de ellos llama a `stopPropagation()`, pero ambos solo están activos cuando
+la descripción ya tiene texto (p. ej. a mitad de escribir `[[`), así que el camino "descripción
+vacía" nunca se solapa con ellos en la práctica.
+
+**Restaurar el scroll del documento original al cerrar el diálogo**: al abrirse `Beside`, el
+diálogo roba el foco de la pestaña del documento que se estaba editando durante todo el tiempo que
+está abierto; se comprobó que, en un documento largo, esa pestaña volvía con el scroll en la parte
+superior al cerrar el diálogo — tanto al aceptar como al cancelar (incluso cancelar, que nunca toca
+el documento, lo mostraba igual, así que la causa es el propio cambio de foco/visibilidad, no la
+edición resultante). Para el flujo `tasksManager.editTaskAtLine` (editor de texto nativo,
+`createOrEditTaskOnLine` en `commands/taskCommands.ts`), se captura `editor.visibleRanges[0]` antes
+de `showTaskEditDialog` y se restaura con `editor.revealRange(..., TextEditorRevealType.AtTop)` al
+volver, tanto si el usuario cancela como si aplica cambios. El otro punto de entrada,
+`TasksApi.editTaskAtLocation` (usado por Obsidian-like), no tiene un `vscode.TextEditor` al que
+aplicar esta técnica — ese lado del arreglo (guardar/restaurar el `scrollTop` del propio webview
+CM6) vive en `c:\git\obsidianlike`, ver la sección `panelScrollTop` de su `CLAUDE.md`.
+
 Cubre el mismo conjunto de campos que el modal Svelte original: descripción, prioridad,
 recurrencia, due/scheduled/start, **Before this**/**After this** (dependencias), **Status**
 (desplegable de estados registrados) y **Created**/**Done**/**Cancelled**. La única pieza que

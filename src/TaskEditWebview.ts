@@ -1161,6 +1161,19 @@ function renderHtml(
         vscode.postMessage({ type: 'cancel' });
     });
 
+    // Esc closes the dialog outright, without requiring a trip down to the Cancel button, but
+    // only while the description is still empty — the one field every task needs, so an empty
+    // description means nothing worth keeping has been entered yet. A non-empty description
+    // leaves Esc alone (no accidental data loss), same as every other field's own Esc handler
+    // above (wikilink dropdown, dependency search) — none of those call stopPropagation, but they
+    // only ever fire while the description already has text (e.g. mid "[[wikilink"), so this can
+    // never race with them in practice.
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && descriptionEl.value.trim() === '') {
+            vscode.postMessage({ type: 'cancel' });
+        }
+    });
+
     descriptionEl.focus();
     descriptionEl.setSelectionRange(descriptionEl.value.length, descriptionEl.value.length);
 })();
