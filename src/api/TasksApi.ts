@@ -121,7 +121,11 @@ function toDto(task: Task): TaskDTO {
     return {
         path: task.path,
         line: task.lineNumber,
-        description: task.descriptionWithoutTags,
+        // Keeps `#tags` in place (unlike `descriptionWithoutTags`) — a consumer rendering this
+        // should show a tag exactly where it appears in the task's own text, not strip it out and
+        // re-append it elsewhere. `tags` (below) is still sent separately for a consumer that
+        // wants the parsed list without needing to re-extract it from the description text.
+        description: task.description,
         tags: task.tags,
         id: task.id,
         dependsOn: task.dependsOn,
