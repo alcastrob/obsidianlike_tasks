@@ -13,7 +13,20 @@ function escapeHtml(text: string): string {
 }
 
 function renderTaskLine(task: Task): string {
-    const checked = task.isDone ? ' checked' : '';
+    // A plain native checkbox can only ever show two visual states (checked/unchecked) — fine for
+    // the default TODO/DONE symbols (' '/'x'/'X'), but an IN_PROGRESS ('/'), WAITING ('w'),
+    // DELEGATED ('d'), or CANCELLED ('-') task was rendering as an indistinguishable plain
+    // unchecked (or, for cancelled, checked) box in a ```tasks``` listing — the actual status
+    // symbol was never consulted here at all. `renderStatusIconHtml` (used elsewhere in this file
+    // for standalone `- [symbol]` checkbox lines) already has the full icon set for every
+    // non-default symbol; reusing it here instead of a hardcoded `<input>` makes a query listing's
+    // checkbox match what the same task looks like as a plain line, or in Obsidian-like's own
+    // ```tasks``` rendering, which already did this consistently.
+    const symbol = task.status.symbol;
+    const checkboxHtml =
+        symbol === ' ' || symbol === 'x' || symbol === 'X'
+            ? `<input type="checkbox" disabled${task.isDone ? ' checked' : ''}>`
+            : renderStatusIconHtml(symbol);
     const strike = task.isDone ? ' style="text-decoration: line-through; opacity: 0.6;"' : '';
 
     const badges: string[] = [];
@@ -35,7 +48,7 @@ function renderTaskLine(task: Task): string {
 
     return (
         `<li class="tasks-list-item">` +
-        `<input type="checkbox" disabled${checked}> ` +
+        `${checkboxHtml} ` +
         `<span${strike}>${escapeHtml(task.descriptionWithoutTags)}</span> ` +
         badges.join(' ') +
         ` ${link}` +

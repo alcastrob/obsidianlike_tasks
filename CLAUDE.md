@@ -207,6 +207,22 @@ de `Config/Settings.ts` más abajo). Los estilos (pills de tags con color determ
 texto, tachado atenuado, `accent-color` verde para el checkbox nativo marcado) están en
 `media/tasks-preview.css`, contribuido vía `contributes.markdown.previewStyles`.
 
+**`renderTaskLine` (listado de un bloque ` ```tasks `) también usa este mapa de iconos, no solo
+`registerRawTaskLineStyling`**: hasta hace poco, el checkbox de cada fila de un listado
+` ```tasks ` era siempre un `<input type="checkbox" disabled>` con solo dos estados posibles
+(marcado/sin marcar, según `task.isDone`) — `task.status.symbol` (el carácter real, `/`/`w`/`d`/`-`)
+nunca se consultaba ahí. Reportado como "no se ven los iconos de tareas en curso o delegadas": una
+tarea En curso (`/`) o Delegada (`d`) — ninguna de las dos "hecha" (`isDone` false) — se veía
+exactamente igual que una tarea Todo normal, y una Cancelada (`-`, que sí cuenta como `isDone`) se
+veía como una tarea Hecha marcada en vez de con su propio icono ✖, inconsistente con cómo esta
+misma extensión ya renderiza una línea de checkbox suelta (`registerRawTaskLineStyling`) y con cómo
+Obsidian-like renderiza *tanto* líneas sueltas como sus propios listados ` ```tasks ` (`STATUS_ICON`
+en `editor.js` de ese repo, mismo conjunto de símbolos). Arreglado: `renderTaskLine` ahora solo usa
+el `<input>` nativo para ` `/`x`/`X` (los dos únicos estados que un checkbox real puede distinguir),
+y `renderStatusIconHtml(symbol)` para cualquier otro símbolo — el mismo helper que
+`registerRawTaskLineStyling` ya usaba, ahora compartido entre ambos renderers en vez de que uno de
+los dos ignorara `status.symbol` por completo.
+
 **Alineación icono-de-estado vs checkbox nativo**: un emoji a color (🔄✖⏳👤) se renderiza
 sensiblemente más grande que el `<input type="checkbox">` nativo al mismo `font-size` — sin una
 caja explícita compartida, una lista con líneas de distinto estado quedaba con iconos de tamaño y
