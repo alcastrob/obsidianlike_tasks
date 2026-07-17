@@ -77,6 +77,77 @@ async function findAllNoteNames(): Promise<NoteIndexEntry[]> {
     });
 }
 
+/** ATX headings only (# .. ######), skipping fenced code blocks so a "#" inside a code sample
+ * isn't mistaken for a heading — mirrors `obsidianlike`'s own `parseHeadings` (extension.ts),
+ * minus the line number (the wikilink suggester below only ever needs the text to match/insert,
+ * not a scroll target). */
+function parseHeadings(text: string): Array<{ level: number; text: string }> {
+    const lines = text.split(/\r\n|\n/);
+    const headings: Array<{ level: number; text: string }> = [];
+    let inFence = false;
+    for (const line of lines) {
+        if (/^\s*(```|~~~)/.test(line)) {
+            inFence = !inFence;
+            continue;
+        }
+        if (inFence) {
+            continue;
+        }
+        const m = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+        if (m) {
+            headings.push({ level: m[1].length, text: m[2].trim() });
+        }
+    }
+    return headings;
+}
+
+/** Escapes glob metacharacters (`[`, `]`, `{`, `}`) so a literal note name containing them is
+ * matched as plain text rather than parsed as a glob character class/brace expansion. */
+function escapeGlob(name: string): string {
+    return name.replace(/[[\]{}]/g, '\\$&');
+}
+
+/** Resolves `notePart` (whatever the user typed before "#" in `[[notePart#...`, which may itself
+ * carry a `carpeta/Nota` directory hint) to the headings of the note it names, for the
+ * description field's wikilink suggester below. Vault-wide search first — same reasoning as
+ * `obsidianlike`'s own `resolveNoteUri` — with the directory hint (if any) only used to break a
+ * tie among several same-named notes, never to narrow the search. Empty array (not an error) if
+ * nothing matches or the file can't be read, so the suggester just shows no heading matches
+ * instead of failing. */
+async function findHeadingsForNote(notePart: string): Promise<Array<{ level: number; text: string }>> {
+    const normalized = notePart.replace(/\\/g, '/');
+    const segments = normalized.split('/').filter(Boolean);
+    const noteName = segments.pop() || normalized;
+    const dirHint = segments.length > 0 ? segments[segments.length - 1] : null;
+    if (!noteName) {
+        return [];
+    }
+
+    const found = await vscode.workspace.findFiles(`**/${escapeGlob(noteName)}.md`, '**/{node_modules,.git,out}/**');
+    if (found.length === 0) {
+        return [];
+    }
+    let uri = found[0];
+    if (found.length > 1 && dirHint) {
+        const parentDirName = (u: vscode.Uri): string => {
+            const parts = vscode.workspace.asRelativePath(u, false).replace(/\\/g, '/').split('/');
+            parts.pop(); // filename
+            return parts.pop() || ''; // immediate parent directory, '' if the note is at the vault root
+        };
+        const match = found.find((u) => parentDirName(u).toLowerCase() === dirHint.toLowerCase());
+        if (match) {
+            uri = match;
+        }
+    }
+
+    try {
+        const document = await vscode.workspace.openTextDocument(uri);
+        return parseHeadings(document.getText());
+    } catch {
+        return [];
+    }
+}
+
 const PRIORITY_GRID: Array<{ priority: Priority; label: string; icon: string }> = [
     { priority: Priority.Lowest, label: 'Lowest', icon: '⏬' },
     { priority: Priority.Low, label: 'Low', icon: '🔽' },
@@ -199,7 +270,14 @@ export async function showTaskEditDialog(
             'obsidianLikeTasksEditTask',
             isEditing ? 'Edit Task' : 'Create Task',
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
-            { enableScripts: true, retainContextWhenHidden: false },
+            // `retainContextWhenHidden: true` — without it, switching to another tab (the dialog
+            // opens Beside the document being edited, so this is a one-click away) tears down the
+            // webview's DOM/JS entirely; VS Code doesn't re-render `panel.webview.html` when the tab
+            // is shown again (it's still the same string, set once at creation), so nothing restores
+            // whatever the user had typed since — reported as the whole dialog's content getting
+            // silently lost. `false` costs a bit of memory for exactly as long as the dialog stays
+            // open (a single short-lived panel, not something left running for a whole session).
+            { enableScripts: true, retainContextWhenHidden: true },
         );
 
         const baselineTask = context.existingTask ?? defaultBaselineTask(context.taskLocation);
@@ -286,6 +364,18 @@ export async function showTaskEditDialog(
                         new Set<string>(excludeKeys ?? []),
                     );
                     void panel.webview.postMessage({ type: 'dependencyResults', field, results });
+                    return;
+                }
+
+                // Powers the description field's `[[Note#Heading` suggester (below): once the user
+                // types a "#" after a note name, the popup switches from listing notes to listing
+                // that note's own headings, which requires reading its file — the webview has no
+                // filesystem access of its own.
+                case 'get-headings': {
+                    const { id, note } = message;
+                    void findHeadingsForNote(note ?? '').then((headings) => {
+                        void panel.webview.postMessage({ type: 'headings-result', id, headings });
+                    });
                     return;
                 }
 
@@ -763,11 +853,16 @@ function renderHtml(
         let items = [];
         let selected = -1;
         let dismissedKey = null;
+        let mode = 'notes'; // 'notes' | 'headings'
+        let currentNotePart = ''; // note name before "#", headings mode only
+        let loading = false;
+        let headingsToken = 0;
 
         function matchNotes(query) {
             const q = query.trim().toLowerCase();
+            const toItem = (note) => ({ type: 'note', name: note.name, dir: note.dir });
             if (!q) {
-                return noteIndex.slice(0, MAX_SUGGESTIONS);
+                return noteIndex.slice(0, MAX_SUGGESTIONS).map(toItem);
             }
             const scored = [];
             for (const note of noteIndex) {
@@ -781,7 +876,22 @@ function renderHtml(
                 if (a.idx !== b.idx) return a.idx - b.idx;
                 return a.note.name.localeCompare(b.note.name);
             });
-            return scored.slice(0, MAX_SUGGESTIONS).map((s) => s.note);
+            return scored.slice(0, MAX_SUGGESTIONS).map((s) => toItem(s.note));
+        }
+
+        // Once the typed text after "[[" contains a "#" (e.g. "[[documento#"), the popup switches
+        // from listing notes to listing *that note's own headings* — mirrors Obsidian-like's own
+        // WikiSuggestView (webview-src/editor.js in that repo), including the same host round-trip
+        // (there's no way to read another file's headings from inside this webview), just adapted
+        // to this file's plain-textarea/procedural style instead of a CM6 ViewPlugin class.
+        const pendingHeadingRequests = {};
+        let headingsReqSeq = 0;
+        function requestHeadings(note) {
+            return new Promise((resolve) => {
+                const id = 'h' + (++headingsReqSeq);
+                pendingHeadingRequests[id] = resolve;
+                vscode.postMessage({ type: 'get-headings', id: id, note: note });
+            });
         }
 
         const MIRROR_PROPS = [
@@ -822,37 +932,55 @@ function renderHtml(
             return { openBracketFrom: pos - match[0].length, query: match[1], pos: pos };
         }
 
-        function render() {
-            if (items.length === 0) {
-                dropdown.hidden = true;
-                return;
-            }
-            dropdown.innerHTML = '';
-            items.forEach((note, i) => {
-                const li = document.createElement('li');
-                li.className = i === selected ? 'selected' : '';
-                const title = document.createElement('span');
-                title.textContent = note.name;
-                li.appendChild(title);
-                if (note.dir) {
-                    const dir = document.createElement('span');
-                    dir.className = 'wikilink-dir';
-                    dir.textContent = note.dir;
-                    li.appendChild(dir);
-                }
-                li.dataset.index = String(i);
-                dropdown.appendChild(li);
-            });
+        function positionDropdown() {
             const coords = caretCoordinates(descriptionEl, openBracketFrom);
             dropdown.style.left = coords.left + 'px';
             dropdown.style.top = (coords.top + coords.lineHeight) + 'px';
             dropdown.hidden = false;
         }
 
+        function render() {
+            if (loading) {
+                dropdown.innerHTML = '';
+                const li = document.createElement('li');
+                li.textContent = 'Cargando encabezados…';
+                li.style.opacity = '0.6';
+                li.style.cursor = 'default';
+                dropdown.appendChild(li);
+                positionDropdown();
+                return;
+            }
+            if (items.length === 0) {
+                dropdown.hidden = true;
+                return;
+            }
+            dropdown.innerHTML = '';
+            items.forEach((item, i) => {
+                const li = document.createElement('li');
+                li.className = i === selected ? 'selected' : '';
+                const title = document.createElement('span');
+                title.textContent = item.type === 'heading' ? '#'.repeat(item.level) + ' ' + item.text : item.name;
+                li.appendChild(title);
+                if (item.type === 'note' && item.dir) {
+                    const dir = document.createElement('span');
+                    dir.className = 'wikilink-dir';
+                    dir.textContent = item.dir;
+                    li.appendChild(dir);
+                }
+                li.dataset.index = String(i);
+                dropdown.appendChild(li);
+            });
+            positionDropdown();
+        }
+
         function close() {
             openBracketFrom = -1;
             items = [];
             selected = -1;
+            mode = 'notes';
+            currentNotePart = '';
+            loading = false;
+            headingsToken++; // invalidate any in-flight requestHeadings() for the mode we're leaving
             dropdown.hidden = true;
         }
 
@@ -869,19 +997,52 @@ function renderHtml(
             if (dismissedKey === key) return;
             dismissedKey = null;
             openBracketFrom = ctx.openBracketFrom;
-            items = matchNotes(ctx.query);
-            selected = items.length > 0 ? 0 : -1;
+
+            const hashIdx = ctx.query.indexOf('#');
+            if (hashIdx === -1) {
+                mode = 'notes';
+                loading = false;
+                items = matchNotes(ctx.query);
+                selected = items.length > 0 ? 0 : -1;
+                render();
+                return;
+            }
+
+            const notePart = ctx.query.slice(0, hashIdx);
+            if (!notePart) { close(); return; }
+            mode = 'headings';
+            currentNotePart = notePart;
+            loading = true;
+            items = [];
+            selected = -1;
             render();
+
+            const headingQuery = ctx.query.slice(hashIdx + 1).trim().toLowerCase();
+            const token = ++headingsToken;
+            requestHeadings(notePart).then((headings) => {
+                if (token !== headingsToken) return; // superseded by a later keystroke or close()
+                items = (headings || [])
+                    .filter((h) => h.text.toLowerCase().includes(headingQuery))
+                    .map((h) => ({ type: 'heading', level: h.level, text: h.text }));
+                loading = false;
+                selected = items.length > 0 ? 0 : -1;
+                render();
+            });
         }
 
         function accept(index) {
             const i = index === undefined ? selected : index;
             if (i < 0 || i >= items.length) return;
-            const note = items[i];
+            const item = items[i];
             const pos = descriptionEl.selectionStart;
             let to = pos;
+            // If the cursor sits inside an already-closed [[...]] (e.g. clicked back in to type
+            // "#cabecera" after the note name), swallow the trailing "]]" into the replaced range
+            // so insertText's own "]]" replaces it instead of leaving both.
             if (descriptionEl.value.slice(pos, pos + 2) === ']]') to += 2;
-            const insertText = '[[' + note.name + ']]';
+            const insertText = item.type === 'heading'
+                ? '[[' + currentNotePart + '#' + item.text + ']]'
+                : '[[' + item.name + ']]';
             descriptionEl.value = descriptionEl.value.slice(0, openBracketFrom) + insertText + descriptionEl.value.slice(to);
             const newPos = openBracketFrom + insertText.length;
             descriptionEl.setSelectionRange(newPos, newPos);
@@ -921,7 +1082,26 @@ function renderHtml(
         dropdown.addEventListener('mousedown', (e) => e.preventDefault());
         dropdown.addEventListener('click', (e) => {
             const li = e.target.closest('li');
-            if (li) accept(Number(li.dataset.index));
+            // The "Cargando encabezados…" placeholder row (see render()) carries no data-index —
+            // it isn't a real suggestion, just a status message, so a click on it must not fall
+            // through to accept(NaN) (items[NaN] is undefined, which would throw on item.type).
+            if (li && li.dataset.index !== undefined) accept(Number(li.dataset.index));
+        });
+
+        // \`pendingHeadingRequests\` lives inside this IIFE's own closure (unlike
+        // \`dependencyResultHandlers\`, which is declared at the outer script scope specifically so
+        // the single shared 'message' listener further down can reach it) — so this needs its own
+        // listener rather than adding a case to that one. Multiple 'message' listeners on the same
+        // window are fine; both just fire.
+        window.addEventListener('message', (event) => {
+            const message = event.data;
+            if (message.type === 'headings-result') {
+                const resolve = pendingHeadingRequests[message.id];
+                if (resolve) {
+                    delete pendingHeadingRequests[message.id];
+                    resolve(message.headings);
+                }
+            }
         });
     })();
 

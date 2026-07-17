@@ -254,7 +254,13 @@ editando desaparecía detrás del diálogo (un grupo de pestañas solo muestra u
 más cerca que permite `WebviewPanel` de un modal flotante real. Al cargar, el foco se pone en el
 `<textarea>` de la descripción con el cursor al final del texto (`descriptionEl.focus()` +
 `setSelectionRange`, al final del `<script>` del webview), para poder empezar a escribir sin un
-clic previo.
+clic previo. `{ enableScripts: true, retainContextWhenHidden: true }` — `retainContextWhenHidden`
+en `true`, no en `false` como estaba antes: sin él, cambiar a otra pestaña (el diálogo se abre
+`Beside` el documento, así que está a un clic) hace que VS Code destruya por completo el DOM/JS del
+webview; al volver a esta pestaña, `panel.webview.html` sigue siendo la misma cadena fijada en la
+creación, así que no hay nada que restaure lo que el usuario hubiera escrito desde entonces —
+reportado como que el contenido del diálogo se perdía sin más. El coste (algo de memoria mientras
+el diálogo está abierto) es aceptable para un panel de vida corta como este.
 
 **Esc cierra el diálogo si la descripción está vacía**: un listener `keydown` a nivel de
 `document` (al final del `<script>`, junto al resto del cableado de botones) manda `{ type:
@@ -375,11 +381,30 @@ plano sin CodeMirror:
   el popup correctamente pegado al cursor, y `ArrowDown` + `Enter` inserta `[[Nota]]` en el sitio
   exacto, respetando un `]]` ya existente justo después del cursor (mismo criterio que
   `accept()` en la versión CM6).
-- **No incluye modo de encabezados** (`[[Nota#Sección`) — a diferencia de la versión CM6, que
-  tras un `#` cambia a listar encabezados de esa nota concreta vía un round-trip `get-headings`.
-  Aquí se paró en el caso más común (enlazar a una nota completa) por alcance/tiempo; añadir el
-  modo de encabezados sería un round-trip nuevo similar a `searchDependency` de arriba, no un
-  cambio de arquitectura.
+- **Modo de encabezados** (`[[Nota#Sección`): en cuanto el texto tras `[[` contiene un `#`, el
+  popup cambia de listar notas a listar los encabezados de esa nota concreta, exactamente como la
+  versión CM6 — mismo round-trip `get-headings`/`headings-result` que esa (aunque implementado por
+  separado aquí: el host de este diálogo es `TaskEditWebview.ts`/`showTaskEditDialog`, no
+  `extension.ts` de Obsidian-like). `findHeadingsForNote(notePart)` (junto a `findAllNoteNames`)
+  resuelve `notePart` (que puede llevar su propia pista de directorio, `carpeta/Nota`) contra todo
+  el vault primero — mismo criterio "vault-wide primero, la pista solo desempata" que
+  `resolveNoteUri` usa en Obsidian-like, no limitado al directorio de la tarea — y `parseHeadings`
+  extrae los encabezados ATX de ese fichero (mismo parser que `obsidianlike`'s propio
+  `parseHeadings`, sin el número de línea, que aquí no hace falta). El estado del popup gana
+  `mode`/`currentNotePart`/`loading`/`headingsToken` (este último para descartar una respuesta que
+  llega después de que el usuario ya haya seguido escribiendo o cerrado el popup — mismo patrón
+  `token !== headingsToken` que la versión CM6). Mientras la petición está en vuelo se muestra una
+  fila "Cargando encabezados…" sin `data-index` — el handler de clic del dropdown comprueba
+  explícitamente `li.dataset.index !== undefined` antes de llamar a `accept()`, ya que un clic
+  sobre esa fila placeholder (`Number(undefined)` → `NaN`) se colaba por el guard existente
+  (`i < 0 || i >= items.length`, ambas comparaciones falsas con `NaN`) y llamaba a `accept(NaN)`,
+  que lanzaba al intentar leer `items[NaN].type`. Verificado extrayendo el HTML/JS real que genera
+  `renderHtml` (mockeando `vscode` para capturar `panel.webview.html` sin abrir VS Code) y
+  ejecutándolo en Chrome headless: escribir `[[documento#` muestra el placeholder y luego los
+  encabezados simulados, filtrar por texto tras el `#` los reduce correctamente, `Enter` inserta
+  `[[documento#Resumen]]`, y el modo de notas (sin `#`) con un índice de notas real sigue
+  funcionando tras el refactor de `matchNotes` (ahora envuelve cada resultado en `{ type: 'note',
+  ... }` para que `render()`/`accept()` puedan distinguir ambos tipos de fila).
 
 ### Comandos registrados
 
