@@ -61,7 +61,14 @@ function renderTaskGroup(tasks: Task[]): string {
 }
 
 function renderQueryResult(result: QueryResult): string {
-    const parts: string[] = ['<div class="tasks-query-result">'];
+    // `zoom` (not `font-size` or `transform: scale`) — a non-standard but Chromium-supported CSS
+    // property that scales this element's entire rendered subtree uniformly: text, emoji/icons,
+    // padding, everything, as a single unit. VS Code's Markdown Preview is Chromium-based, so this
+    // is safe here. `font-size` alone wouldn't shrink anything sized in fixed px/badges with their
+    // own absolute padding, and `transform: scale` doesn't reflow layout (leaves the original,
+    // unscaled box size behind, just visually shrunk within it) — `zoom` actually resizes the box.
+    const zoomStyle = result.zoomFactor !== 100 ? ` style="zoom: ${result.zoomFactor}%;"` : '';
+    const parts: string[] = [`<div class="tasks-query-result"${zoomStyle}>`];
 
     if (result.unrecognizedLines.length > 0) {
         parts.push(

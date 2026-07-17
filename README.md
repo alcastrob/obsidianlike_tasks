@@ -16,6 +16,7 @@ Extensión de VS Code que porta el plugin [Tasks](https://github.com/obsidian-ta
   - Combinadores: `(filtro A) OR (filtro B) AND NOT (filtro C)`, con paréntesis anidados.
   - Scripting: `filter by function <expresión JS>` y `group by function <expresión JS>` (con `task` en scope — puede devolver un array para agrupar una tarea en varios grupos a la vez).
   - `sort by <campo> [reverse]` (admite varias líneas como criterio de desempate), `limit <n>`, y `hide`/`show <campo>` (aceptadas pero sin efecto — el renderer no tiene aún toggles de columnas).
+  - `zoom factor <N>%` — reduce (o amplía) el tamaño de todo el listado renderizado (texto, emojis, badges) frente al resto de la nota; sin esta línea, tamaño normal. No es parte del lenguaje original de Obsidian Tasks, es propio de este port.
   - Se renderizan en la **Vista Previa de Markdown nativa de VS Code** (`Ctrl+Shift+V`), y también dentro del editor de la extensión "Obsidian-like" (`angelCastro.obsidian-like`) si está instalada.
 - **Estilizado enriquecido de líneas de tarea sueltas** (fuera de bloques ` ```tasks ```) en la Vista Previa de Markdown: icono distinto por estado para símbolos no estándar (`/`, `-`, y cualquier otro más allá de espacio/`x`), tachado solo en cancelada/completada, y `#tags` como pills de color — igual que hace Obsidian con cualquier checkbox de una nota, no solo dentro de una query.
 

@@ -147,6 +147,27 @@ invalida la línea entera, igual que antes). `group by <campo>` soporta los camp
 siempre, y **`group by function <expresión JS>`**, que puede devolver un array para que una tarea
 aparezca en varios grupos a la vez (p. ej. `task.tags.map(...)`) — igual que el original.
 
+**`zoom factor <N>%` — no es parte del lenguaje de queries original de Obsidian Tasks, es un
+añadido propio de este port.** Obsidian Tasks nunca necesitó algo así porque Obsidian ya tiene su
+propio ajuste de tamaño de fuente a nivel de vault/tema — este port no tiene ningún control
+equivalente para achicar *un listado concreto* frente al resto de la nota, así que se pidió como
+cláusula de la propia query. Se parsea en `TasksQuery.parseZoomFactor` (mismo estilo que
+`parseLimit`: una regex, rechaza valores sin sentido — `0%` o negativo — devolviendo `false` para
+que la línea se reporte como no reconocida, en vez de aceptar silenciosamente un valor que dejaría
+el listado invisible o invertido) y viaja en `QueryResult.zoomFactor`/`TasksQueryResultDTO.zoomFactor`
+(`api/TasksApi.ts`) como un número siempre presente — `100` (tamaño normal) si la query no incluye
+la cláusula, nunca `null`, para que cada consumidor no tenga que comprobar ausencia por separado.
+Cada renderer lo aplica como CSS `zoom` (no `font-size` ni `transform: scale`) sobre el contenedor
+del listado — `zoom` es una propiedad no estándar pero soportada en Chromium (VS Code y el webview
+de Obsidian-like lo son ambos) que escala **todo** el subárbol renderizado como una sola unidad
+(texto, emojis/iconos de badges, padding, la caja de layout incluida) — `font-size` por sí solo no
+encogería nada con padding en px fijos, y `transform: scale` no relayout-ea (deja la caja original
+del mismo tamaño, solo la ve más pequeña dentro de sí misma). `markdownTasksPlugin.ts`
+(`renderQueryResult`) lo pone en el `<div class="tasks-query-result">` exterior;
+`obsidianlike`'s `editor.js` (`renderTasksQueryResult`) lo pone en el propio `.cm-tasks-query` —
+omitido por completo (no fijado a `'100%'` literal) cuando el factor es el normal, para que una
+query sin esta cláusula se renderice exactamente igual que antes de que existiera.
+
 **Limitación heredada del propio Obsidian Tasks, no introducida aquí**: `TaskRegularExpressions.hashTags`
 corta un tag en el primer espacio, así que un tag `#[[Project Uno]]` con espacio se parsea como
 `#[[Project` (pierde " Uno]]"). Si usas `group by function task.tags.map(tag =>

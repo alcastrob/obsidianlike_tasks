@@ -38,6 +38,11 @@ export interface TasksQueryResultDTO {
     groups: Array<{ name: string; items: TaskDTO[] }> | null;
     /** Lines in the query that weren't understood — show these to the user, don't fail silently. */
     unrecognizedLines: string[];
+    /** `zoom factor <N>%` query line — see {@link QueryResult.zoomFactor} in core/Query/Query.ts.
+     * `100` (normal size) when the query didn't specify one. A consumer rendering this listing
+     * should scale it by this percentage (e.g. CSS `zoom`), the same way this extension's own
+     * Markdown Preview renderer does. */
+    zoomFactor: number;
 }
 
 /**
@@ -172,7 +177,7 @@ export function createTasksApi(
         renderTasksQuery(queryText: string, queryFilePath?: string): TasksQueryResultDTO {
             const taskIndex = getTaskIndex();
             if (!taskIndex) {
-                return { items: [], groups: null, unrecognizedLines: [] };
+                return { items: [], groups: null, unrecognizedLines: [], zoomFactor: 100 };
             }
 
             const query = new TasksQuery(queryText, queryFilePath);
@@ -182,6 +187,7 @@ export function createTasksApi(
                 items: result.groups ? [] : result.tasks.map(toDto),
                 groups: result.groups ? result.groups.map((g) => ({ name: g.name, items: g.tasks.map(toDto) })) : null,
                 unrecognizedLines: result.unrecognizedLines,
+                zoomFactor: result.zoomFactor,
             };
         },
 

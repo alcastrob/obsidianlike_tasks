@@ -78,6 +78,13 @@ export interface QueryResult {
     groups: Array<{ name: string; tasks: Task[] }> | null;
     /** Lines in the query source that were not understood. Shown to the user, never thrown. */
     unrecognizedLines: string[];
+    /** `zoom factor <N>%` — a percentage a renderer should scale the whole rendered listing by
+     * (text, badges/emoji, everything), for a more compact view of a long query result. `100`
+     * (normal size) when the query didn't specify one — not a custom extension of Obsidian Tasks'
+     * own query language, this port's own addition, since the renderer here (unlike the original
+     * plugin, which relies on Obsidian's own vault-wide font-size setting) has no other way to
+     * make one specific listing smaller than the rest of the note. */
+    zoomFactor: number;
 }
 
 function dateValue(task: Task, field: DateField): Moment | null {
@@ -188,6 +195,7 @@ export class TasksQuery {
     private readonly sortInstructions: SortInstruction[] = [];
     private groupByFn: GroupFn | null = null;
     private limitCount: number | null = null;
+    private zoomFactor: number | null = null;
     public readonly unrecognizedLines: string[] = [];
 
     /**
@@ -228,13 +236,20 @@ export class TasksQuery {
             tasks,
             groups: this.groupByFn ? this.group(tasks, this.groupByFn) : null,
             unrecognizedLines: this.unrecognizedLines,
+            zoomFactor: this.zoomFactor ?? 100,
         };
     }
 
     // ---- parsing -----------------------------------------------------------------------
 
     private parseLine(line: string): boolean {
-        if (this.parseSortBy(line) || this.parseGroupBy(line) || this.parseLimit(line) || this.parseHideShow(line)) {
+        if (
+            this.parseSortBy(line) ||
+            this.parseGroupBy(line) ||
+            this.parseLimit(line) ||
+            this.parseHideShow(line) ||
+            this.parseZoomFactor(line)
+        ) {
             return true;
         }
 
@@ -605,6 +620,23 @@ export class TasksQuery {
             return false;
         }
         this.limitCount = Number.parseInt(match[1], 10);
+        return true;
+    }
+
+    /** `zoom factor <N>%` — not part of upstream Obsidian Tasks' query language, this port's own
+     * addition (see {@link QueryResult.zoomFactor}). `0` or negative would make the listing
+     * invisible/inverted, so it's rejected as unrecognised rather than silently accepted — same
+     * treatment `parseLimit` gives a nonsensical value indirectly via its `\d+` requirement. */
+    private parseZoomFactor(line: string): boolean {
+        const match = line.match(/^zoom factor (\d+(?:\.\d+)?)\s*%$/i);
+        if (!match) {
+            return false;
+        }
+        const value = Number.parseFloat(match[1]);
+        if (!(value > 0)) {
+            return false;
+        }
+        this.zoomFactor = value;
         return true;
     }
 
