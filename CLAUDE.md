@@ -249,10 +249,24 @@ sensiblemente más grande que el `<input type="checkbox">` nativo al mismo `font
 caja explícita compartida, una lista con líneas de distinto estado quedaba con iconos de tamaño y
 padding inconsistentes entre sí y respecto al checkbox (comprobado renderizando una muestra real
 con markdown-it + Chrome headless, no solo a ojo). `input[type='checkbox']` y `.tasks-status-icon`
-comparten ahora una caja fija (`1.15em` × `1.15em`, `inline-flex` centrado); el icono reduce su
-`font-size` a `0.7em` con `overflow: hidden` para que el glifo (más grande que su caja) quede
-recortado en vez de desbordar. `.tasks-status-icon-unknown` (símbolos sin icono conocido) sigue
-siendo la excepción con su propia píldora de tamaño variable.
+comparten ahora una caja fija (`1.15em` × `1.15em`, `inline-flex` centrado). `.tasks-status-icon-unknown`
+(símbolos sin icono conocido) sigue siendo la excepción con su propia píldora de tamaño variable.
+
+**Recorte del icono de estado (fix posterior al párrafo anterior)**: la primera versión, además de
+la caja fija de arriba, reducía el `font-size` propio del icono a `0.7em` y le añadía `overflow:
+hidden`, para que el glifo (más grande que su caja) quedara recortado en vez de desbordar.
+Reportado como "los iconos de estado se ven cortados para cualquier estado que no sea To do"
+(captura mostrando solo una esquina del glifo). Dos problemas, uno encima del otro: `width`/`height`
+en `em` se calculan contra el `font-size` **propio** del elemento, no el del padre — así que reducir
+el `font-size` de `.tasks-status-icon` a `0.7em` también encogía su propia caja (a ~0.8em del texto
+circundante, no el `1.15em` pretendido), quedando más pequeña que la del checkbox, no igualada con
+ella; y el glifo visual de un emoji a color es más alto que su `font-size` nominal
+independientemente de lo pequeño que sea ese `font-size` — así que encogerlo nunca evitó el
+recorte, solo lo empeoró al encoger también la caja que lo recortaba. Arreglado sin tocar
+`font-size` en absoluto: el icono hereda el tamaño del texto circundante, así que `width`/`height:
+1.15em` aquí se calculan contra el mismo `font-size` que usa el checkbox (igualándolo de verdad), y
+se quita `overflow: hidden` — el glifo se ve completo siempre, a costa de desbordar ligeramente la
+caja en algún caso puntual en vez de encajar siempre pero roto.
 
 **Viñeta de lista en líneas `[w]`/`[d]`/`[/]`/`[-]` sueltas**: reportado como "el emoji de las
 tareas Waiting/Delegated se ve fatal" — en una línea de checkbox suelta (no en un listado
@@ -574,7 +588,23 @@ submódulo/worktree con este):
    debe tratarlo como "no resoluble", no como error. El renderizado del popup en sí (hover con
    retardo de 300 ms, mismo patrón que el preview de `[[wikilinks]]` de Obsidian-like) vive
    enteramente en `webview-src/editor.js` de ese repo (`attachDependencyHoverPreview`,
-   `renderTaskRow`) — ver la sección correspondiente en su propio `CLAUDE.md`.
+   `renderTaskRow`) — ver la sección correspondiente en su propio `CLAUDE.md`. Ese mismo popup
+   tuvo un bug de posicionamiento (aparecía sin estilo alguno al final de la página, no anclado al
+   texto) causado por cómo `EditorView.theme()` de CM6 alcanza — o no — a un elemento añadido a
+   `document.body`; el detalle vive enteramente del lado de Obsidian-like, ver su `CLAUDE.md`.
+
+   **`TaskDTO.blocking` — inversa de `dependsOnTasks`**: reportado como "las referencias 'After
+   this' no muestran nada en absoluto" en el listado de Obsidian-like — a diferencia de `dependsOn`
+   (`⛔`, serializado de verdad en el fichero como parte de la tarea), la relación inversa ("qué
+   tareas dependen de esta") nunca se calculaba para el listado, solo para el propio diálogo
+   "Create or edit Task" (`initialBlocking` en `TaskEditWebview.ts`, campo "After this"). Ahora
+   `renderTasksQuery` también construye `blockingById: Map<string, Task[]>` — recorriendo el
+   `dependsOn` de cada tarea del vault una sola vez e invirtiéndolo — y cada `TaskDTO` expone
+   `blocking: DependencyRefDTO[]` con esa lista ya resuelta (mismo shape que `dependsOnTasks`, sin
+   necesidad de una lista de ids en crudo aparte: al ser siempre el resultado de escanear tareas
+   reales del vault, nunca hay una entrada "no resoluble" como sí puede pasar con `dependsOn`).
+   `blockingById` se construye una sola vez por `renderTasksQuery` (no una vez por tarea), para que
+   resolver `blocking` de cada tarea del resultado sea O(tamaño del vault) en total, no cuadrático.
 
 ### Scripts npm
 

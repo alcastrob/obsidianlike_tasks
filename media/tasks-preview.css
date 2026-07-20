@@ -11,8 +11,7 @@ input[type='checkbox']:checked {
 /* A color-emoji glyph (🔄⏸️👤❌...) renders noticeably larger than a checkbox's own intrinsic
  * size at the same font-size, and browsers give checkboxes their own default box/margin anyway —
  * without an explicit shared box, a list mixing `[ ]`/`[x]` lines with non-default-status lines
- * (`[/]`, `[w]`...) doesn't line up. Both share this fixed box; the icon's font-size is shrunk so
- * its (larger) glyph fits inside instead of overflowing it. */
+ * (`[/]`, `[w]`...) doesn't line up. Both share this fixed box. */
 input[type='checkbox'] {
     width: 1.15em;
     height: 1.15em;
@@ -22,14 +21,26 @@ input[type='checkbox'] {
     margin: 0 0.3em 0 0;
 }
 
+/* An earlier version also shrank this element's own `font-size` to 0.7em and clipped it with
+ * `overflow: hidden`, trying to force the (larger) emoji glyph inside the same box as the native
+ * checkbox above. That backfired twice over: `width`/`height` in `em` resolve against the
+ * element's *own* font-size, not its parent's, so shrinking `font-size` here also shrank the box
+ * itself (down to ~0.8em of the surrounding text, not the intended 1.15em) — smaller than the
+ * checkbox's box, not matching it — and a color emoji's visual glyph is taller than its nominal
+ * font-size box regardless, so `overflow: hidden` sliced off a visible chunk of it. Reported as
+ * "los iconos de estado se ven cortados para cualquier estado que no sea To do" (screenshot showed
+ * only a corner of the glyph surviving). Fixed by no longer touching `font-size` at all — the icon
+ * renders at the surrounding text's own size, so `width`/`height: 1.15em` here now resolve against
+ * the same font-size the checkbox's own `1.15em` does, genuinely matching its box — and dropping
+ * `overflow: hidden`, so a glyph that's still taller than 1.15em (some color-emoji fonts render
+ * that way regardless of box size) is fully visible instead of clipped, at the cost of occasional
+ * slight visual overflow past the box edge rather than a guaranteed-but-broken exact fit. */
 .tasks-status-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
     width: 1.15em;
     height: 1.15em;
-    font-size: 0.7em;
     line-height: 1;
     vertical-align: middle;
     position: relative;

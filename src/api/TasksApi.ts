@@ -33,6 +33,11 @@ export interface TaskDTO {
      * *every* task in the workspace, not just this query's own results, since a dependency can
      * point at a task this particular query filtered out. */
     dependsOnTasks: DependencyRefDTO[];
+    /** Tasks elsewhere in the workspace that depend on *this* one (i.e. every task whose own
+     * `dependsOn` includes this task's `id`) — the inverse of `dependsOnTasks`, computed the same
+     * way "After this" is computed for `TaskEditWebview.ts`'s dependency fields. Empty if this
+     * task has no `id` (nothing else could reference it) or nothing does yet. */
+    blocking: DependencyRefDTO[];
     isDone: boolean;
     /** The raw checkbox symbol (`' '`, `'x'`, `'/'`, a custom letter, ...) — `isDone` alone can't
      * distinguish "in progress" from "todo" from "some custom status", which a consumer needs to
@@ -139,7 +144,18 @@ export interface TasksExtensionApi {
     onDidChangeTasks: vscode.Event<void>;
 }
 
-function toDto(task: Task, tasksById: Map<string, Task>): TaskDTO {
+function toDependencyRefDTO(t: Task): DependencyRefDTO {
+    return {
+        id: t.id,
+        description: t.description,
+        path: t.path,
+        line: t.lineNumber,
+        isDone: t.isDone,
+        statusSymbol: t.status.symbol,
+    };
+}
+
+function toDto(task: Task, tasksById: Map<string, Task>, blockingById: Map<string, Task[]>): TaskDTO {
     return {
         path: task.path,
         line: task.lineNumber,
@@ -154,14 +170,8 @@ function toDto(task: Task, tasksById: Map<string, Task>): TaskDTO {
         dependsOnTasks: task.dependsOn
             .map((id) => tasksById.get(id))
             .filter((t): t is Task => t !== undefined)
-            .map((t) => ({
-                id: t.id,
-                description: t.description,
-                path: t.path,
-                line: t.lineNumber,
-                isDone: t.isDone,
-                statusSymbol: t.status.symbol,
-            })),
+            .map(toDependencyRefDTO),
+        blocking: (task.id ? blockingById.get(task.id) : undefined)?.map(toDependencyRefDTO) ?? [],
         isDone: task.isDone,
         statusSymbol: task.status.symbol,
         isOverdue: !task.isDone && task.dueDate !== null && task.dueDate.isBefore(moment(), 'day'),
@@ -210,15 +220,27 @@ export function createTasksApi(
 
             const allTasks = taskIndex.getAllTasks();
             const tasksById = new Map<string, Task>();
+            // Inverse of `tasksById`/`dependsOn`: for each id, every task elsewhere that declares
+            // a dependency *on* it — built once per query (not per task) so resolving `blocking`
+            // for every task in the result stays O(vault size) instead of O(vault size squared).
+            const blockingById = new Map<string, Task[]>();
             for (const t of allTasks) {
                 if (t.id) {
                     tasksById.set(t.id, t);
+                }
+                for (const dependsOnId of t.dependsOn) {
+                    const list = blockingById.get(dependsOnId);
+                    if (list) {
+                        list.push(t);
+                    } else {
+                        blockingById.set(dependsOnId, [t]);
+                    }
                 }
             }
 
             const query = new TasksQuery(queryText, queryFilePath);
             const result = query.apply(allTasks);
-            const dto = (t: Task) => toDto(t, tasksById);
+            const dto = (t: Task) => toDto(t, tasksById, blockingById);
 
             return {
                 items: result.groups ? [] : result.tasks.map(dto),
