@@ -6,6 +6,17 @@ import { TasksQuery } from '../core/Query/Query';
 import { editTaskFromLineText } from '../commands/taskCommands';
 import type { TaskIndex } from '../TaskIndex';
 
+/** Resolved info for one entry of `TaskDTO.dependsOn` — enough for a consumer to show a preview
+ * of the referenced task (e.g. a hover popup) without a second round-trip. */
+export interface DependencyRefDTO {
+    id: string;
+    description: string;
+    path: string;
+    line: number;
+    isDone: boolean;
+    statusSymbol: string;
+}
+
 /** Plain, JSON-serialisable summary of a {@link Task}, for consumers outside this extension. */
 export interface TaskDTO {
     path: string;
@@ -16,6 +27,12 @@ export interface TaskDTO {
     id: string;
     /** Ids of tasks this one depends on (`⛔`) — empty if none. */
     dependsOn: string[];
+    /** Resolved entries for `dependsOn`, in no particular order and possibly shorter than
+     * `dependsOn` — an id with no matching task anywhere in the workspace (stale after the
+     * referenced task's `🆔` was removed or changed) simply has no entry here. Resolved against
+     * *every* task in the workspace, not just this query's own results, since a dependency can
+     * point at a task this particular query filtered out. */
+    dependsOnTasks: DependencyRefDTO[];
     isDone: boolean;
     /** The raw checkbox symbol (`' '`, `'x'`, `'/'`, a custom letter, ...) — `isDone` alone can't
      * distinguish "in progress" from "todo" from "some custom status", which a consumer needs to
@@ -122,7 +139,7 @@ export interface TasksExtensionApi {
     onDidChangeTasks: vscode.Event<void>;
 }
 
-function toDto(task: Task): TaskDTO {
+function toDto(task: Task, tasksById: Map<string, Task>): TaskDTO {
     return {
         path: task.path,
         line: task.lineNumber,
@@ -134,6 +151,17 @@ function toDto(task: Task): TaskDTO {
         tags: task.tags,
         id: task.id,
         dependsOn: task.dependsOn,
+        dependsOnTasks: task.dependsOn
+            .map((id) => tasksById.get(id))
+            .filter((t): t is Task => t !== undefined)
+            .map((t) => ({
+                id: t.id,
+                description: t.description,
+                path: t.path,
+                line: t.lineNumber,
+                isDone: t.isDone,
+                statusSymbol: t.status.symbol,
+            })),
         isDone: task.isDone,
         statusSymbol: task.status.symbol,
         isOverdue: !task.isDone && task.dueDate !== null && task.dueDate.isBefore(moment(), 'day'),
@@ -180,12 +208,21 @@ export function createTasksApi(
                 return { items: [], groups: null, unrecognizedLines: [], zoomFactor: 100 };
             }
 
+            const allTasks = taskIndex.getAllTasks();
+            const tasksById = new Map<string, Task>();
+            for (const t of allTasks) {
+                if (t.id) {
+                    tasksById.set(t.id, t);
+                }
+            }
+
             const query = new TasksQuery(queryText, queryFilePath);
-            const result = query.apply(taskIndex.getAllTasks());
+            const result = query.apply(allTasks);
+            const dto = (t: Task) => toDto(t, tasksById);
 
             return {
-                items: result.groups ? [] : result.tasks.map(toDto),
-                groups: result.groups ? result.groups.map((g) => ({ name: g.name, items: g.tasks.map(toDto) })) : null,
+                items: result.groups ? [] : result.tasks.map(dto),
+                groups: result.groups ? result.groups.map((g) => ({ name: g.name, items: g.tasks.map(dto) })) : null,
                 unrecognizedLines: result.unrecognizedLines,
                 zoomFactor: result.zoomFactor,
             };

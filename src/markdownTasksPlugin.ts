@@ -167,14 +167,15 @@ const STATUS_ICON_EMOJI: Record<string, string> = {
     d: '👤',
 };
 
-function renderStatusIconHtml(symbol: string): string {
+function renderStatusIconHtml(symbol: string, extraClass = ''): string {
+    const classSuffix = extraClass ? ` ${extraClass}` : '';
     const emoji = STATUS_ICON_EMOJI[symbol];
     if (emoji) {
-        return `<span class="tasks-status-icon" title="${escapeHtml(symbol)}">${emoji}</span>`;
+        return `<span class="tasks-status-icon${classSuffix}" title="${escapeHtml(symbol)}">${emoji}</span>`;
     }
-    return `<span class="tasks-status-icon tasks-status-icon-unknown" title="${escapeHtml(symbol)}">${escapeHtml(
+    return `<span class="tasks-status-icon tasks-status-icon-unknown${classSuffix}" title="${escapeHtml(
         symbol,
-    )}</span>`;
+    )}">${escapeHtml(symbol)}</span>`;
 }
 
 /** Rewrites a single line's `[symbol]` checkbox into an inert placeholder, if it has a non-default
@@ -246,6 +247,13 @@ function rewriteRawTaskLines(src: string): string {
     return lines.join('\n');
 }
 
+// `tasks-status-icon-raw` (vs. the plain `tasks-status-icon` used in a ```tasks``` listing's
+// <li>) lets tasks-preview.css hide the bullet only for these lines: a `[ ]`/`[x]` line gets
+// VS Code's own `task-list-item` treatment (no bullet, native checkbox) because its bracket is
+// left untouched, but the bracket for every other symbol was already replaced with the inert
+// placeholder above *before* VS Code's own checkbox detection ever runs, so VS Code never
+// recognises those lines as task items at all — without this class they kept a plain bullet
+// next to the icon, inconsistent with their `[ ]`/`[x]` neighbours in the same list.
 function decodeIconAndStrikeMarkers(html: string): string {
     return html
         .split(ICON_MARKER_OPEN)
@@ -254,7 +262,9 @@ function decodeIconAndStrikeMarkers(html: string): string {
             const closeIdx = chunk.indexOf(ICON_MARKER_CLOSE);
             if (closeIdx === -1) return ICON_MARKER_OPEN + chunk;
             const symbol = decodeURIComponent(chunk.slice(0, closeIdx));
-            return renderStatusIconHtml(symbol) + chunk.slice(closeIdx + ICON_MARKER_CLOSE.length);
+            return (
+                renderStatusIconHtml(symbol, 'tasks-status-icon-raw') + chunk.slice(closeIdx + ICON_MARKER_CLOSE.length)
+            );
         })
         .join('')
         .split(CANCELLED_STRIKE_OPEN)

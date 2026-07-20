@@ -254,6 +254,24 @@ comparten ahora una caja fija (`1.15em` × `1.15em`, `inline-flex` centrado); el
 recortado en vez de desbordar. `.tasks-status-icon-unknown` (símbolos sin icono conocido) sigue
 siendo la excepción con su propia píldora de tamaño variable.
 
+**Viñeta de lista en líneas `[w]`/`[d]`/`[/]`/`[-]` sueltas**: reportado como "el emoji de las
+tareas Waiting/Delegated se ve fatal" — en una línea de checkbox suelta (no en un listado
+` ```tasks `), el símbolo de estas tareas ya se ha sustituido por el marcador inerte *antes* de que
+la detección de checkbox propia de VS Code (la que sea, no la implementa esta extensión) llegue a
+ver la línea — así que esa línea nunca coincide con el patrón `[ ]`/`[x]` que activa el tratamiento
+`task-list-item` (sin viñeta) que VS Code sí aplica a sus vecinas `[ ]`/`[x]`. El resultado: una
+viñeta (•) normal de lista pegada justo al lado del icono, algo que ninguna tarea `[ ]`/`[x]` de la
+misma lista tiene — inconsistente y, con el icono ya en una caja ajustada (ver el párrafo anterior),
+se leía roto. Arreglado sin intentar replicar los márgenes internos (no documentados, no
+controlados por esta extensión) que VS Code usa para su propio `task-list-item`: `renderStatusIconHtml`
+acepta ahora un segundo parámetro `extraClass`, y `decodeIconAndStrikeMarkers` (la ruta de líneas
+sueltas, no `renderTaskLine`) lo usa para añadir `tasks-status-icon-raw` — una clase que
+`renderTaskLine` (listado) nunca pone, así que el ajuste no toca el listado, que no tenía este
+problema (sus filas no tienen viñeta nativa que ocultar, es un `<li>` propio sin relación con la
+detección de VS Code). `media/tasks-preview.css` añade `li:has(.tasks-status-icon-raw) { list-style:
+none; }` — selector por descendiente, no por hijo directo, para no depender de si markdown-it
+envuelve el contenido en `<p>` (lista "loose") o no (lista "tight").
+
 **Fechas sin estilo de "badge"**: en el listado de un bloque ` ```tasks ` (`renderTaskLine`), la
 fecha de vencimiento ya no lleva la clase `tasks-badge` — antes se veía en un color/tamaño
 distinto del resto de la tarea (píldora con fondo, `font-size: 0.85em`); ahora es texto plano con
@@ -539,6 +557,24 @@ submódulo/worktree con este):
    extension host de Obsidian-like, el cual llama a `editTaskAtLocation`. Detalle completo en las
    secciones "```tasks``` query blocks" y "Keyboard shortcut for 'edit task at cursor'" del
    `CLAUDE.md` de ese repo.
+
+   **`TaskDTO.dependsOnTasks` — resolución de dependencias para el popup de hover de
+   Obsidian-like**: reportado como "en el listado, la dependencia muestra el id crudo pero al
+   pasar el cursor no aparece un popup con la tarea referenciada". `TaskDTO.dependsOn` (`⛔`) solo
+   llevaba los ids en crudo — ni esta extensión ni Obsidian-like tenían forma de mostrar *qué*
+   tarea hay detrás de un id sin una consulta aparte. `renderTasksQuery` (`api/TasksApi.ts`) ya
+   construye `taskIndex.getAllTasks()` para evaluar la query; ese mismo array, indexado una vez
+   por `id` en un `Map`, es suficiente para resolver cada entrada de `dependsOn` de cada tarea del
+   resultado **sin una segunda consulta**. Cada `TaskDTO` gana `dependsOnTasks:
+   DependencyRefDTO[]` (`{ id, description, path, line, isDone, statusSymbol }`), resuelto contra
+   *todo* el vault, no solo contra las tareas del resultado de esta query — una dependencia puede
+   apuntar a una tarea que esta query concreta dejó fuera (p. ej. una tarea ya hecha, en un
+   listado `not done`). Un id sin tarea correspondiente (id obsoleto, o llamador con un build
+   antiguo de esta extensión) simplemente no tiene entrada en `dependsOnTasks` — el consumidor
+   debe tratarlo como "no resoluble", no como error. El renderizado del popup en sí (hover con
+   retardo de 300 ms, mismo patrón que el preview de `[[wikilinks]]` de Obsidian-like) vive
+   enteramente en `webview-src/editor.js` de ese repo (`attachDependencyHoverPreview`,
+   `renderTaskRow`) — ver la sección correspondiente en su propio `CLAUDE.md`.
 
 ### Scripts npm
 

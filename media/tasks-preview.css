@@ -37,6 +37,18 @@ input[type='checkbox'] {
     margin: 0 0.3em 0 0;
 }
 
+/* A raw `- [w]`/`- [d]`/`- [/]`/`- [-]` checkbox line never matches VS Code's own `[ ]`/`[x]`
+ * task-list-item detection (its bracket was already swapped for our own icon before that runs),
+ * so without this the line keeps its default bullet next to the icon while `[ ]`/`[x]` siblings
+ * in the same list have none — inconsistent and, with a bullet sitting right against the
+ * already-tight icon box, visually broken. `:has()` (not a class on the <li> itself, which
+ * markdown-it never gives us a hook to add) is scoped to lines containing this icon only, so a
+ * ```tasks``` query listing's own bullet-less/bulleted styling (a separate, custom <ul>) is
+ * untouched. */
+li:has(.tasks-status-icon-raw) {
+    list-style: none;
+}
+
 .tasks-status-icon-unknown {
     width: auto;
     min-width: 1.15em;
