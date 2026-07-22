@@ -107,7 +107,12 @@ Filtros atómicos soportados: `not done`/`done`, `status.type is [not] <TYPE>` (
 IN_PROGRESS, DONE, CANCELLED, ON_HOLD, NON_TASK — de los seis statuses que este port registra por
 defecto, `Delegated` (`d`) cae bajo TODO y `Waiting` (`w`) bajo ON_HOLD, ver "Status" en
 `TaskEditWebview.ts` más abajo; cualquier otro status con nombre propio sigue sin UI de
-configuración, así que su `.type` será TODO a menos que se registre a mano), `<due|scheduled|start|done|created|cancelled> before/after/on
+configuración, así que su `.type` será TODO a menos que se registre a mano), **`status.name
+includes/does not include <texto>`** (filtra por el nombre del status en sí — p. ej. `status.name
+includes Delegated` o `status.name includes Waiting` — la única forma de seleccionar esos dos
+statuses de forma precisa, ya que ninguno tiene un `.type` propio distintivo; mismo comportamiento
+que `StatusNameField` del original, que tampoco soporta `is`, solo `includes`/`does not
+include`/`regex matches`, de ahí que este puerto tampoco lo añada), `<due|scheduled|start|done|created|cancelled> before/after/on
 <fecha>` (acepta tanto `start` como `starts`, igual que Obsidian), `no/has <campo> date`,
 `happens before/after/on <fecha>` / `has/no happens date` (pseudo-campo que mira due, scheduled
 y start a la vez, igual que `HappensDateField` del original — útil para queries tipo `(happens

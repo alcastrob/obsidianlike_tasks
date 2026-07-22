@@ -312,6 +312,7 @@ export class TasksQuery {
         return (
             this.parseStatusFilter(text) ??
             this.parseStatusTypeFilter(text) ??
+            this.parseStatusNameFilter(text) ??
             this.parseDateFilter(text) ??
             this.parseHappensFilter(text) ??
             this.parseDependsOnFilter(text) ??
@@ -337,7 +338,10 @@ export class TasksQuery {
         return null;
     }
 
-    /** `status.type is <TYPE>` / `status.type is not <TYPE>`, e.g. `status.type is IN_PROGRESS`. */
+    /** `status.type is <TYPE>` / `status.type is not <TYPE>`, e.g. `status.type is IN_PROGRESS`.
+     * Note that `Waiting`/`Delegated` don't have a type of their own — they fall under ON_HOLD/
+     * TODO respectively (see {@link StatusRegistry.addDefaultStatusTypes}) — so selecting those
+     * two statuses specifically requires {@link parseStatusNameFilter} instead. */
     private parseStatusTypeFilter(line: string): FilterFn | null {
         const match = line.match(/^status\.type is (not )?(\w+)$/i);
         if (!match) {
@@ -346,6 +350,25 @@ export class TasksQuery {
         const negate = match[1] !== undefined;
         const type = match[2].toUpperCase();
         return (task) => (task.status.type === type) !== negate;
+    }
+
+    /** `status.name includes <text>` / `status.name does not include <text>`, matching by the
+     * status's display name (e.g. "Delegated", "Waiting", "In Progress") rather than its type —
+     * the only way to select a status like Delegated or Waiting precisely, since neither has a
+     * distinct `status.type` of its own (see {@link parseStatusTypeFilter}). Mirrors upstream's
+     * `StatusNameField`, which is likewise `includes`/`does not include` only, not `is`. */
+    private parseStatusNameFilter(line: string): FilterFn | null {
+        const includes = line.match(/^status\.name includes (.+)$/i);
+        if (includes) {
+            const needle = includes[1].toLowerCase();
+            return (task) => task.status.name.toLowerCase().includes(needle);
+        }
+        const excludes = line.match(/^status\.name does not include (.+)$/i);
+        if (excludes) {
+            const needle = excludes[1].toLowerCase();
+            return (task) => !task.status.name.toLowerCase().includes(needle);
+        }
+        return null;
     }
 
     private parseDateFilter(line: string): FilterFn | null {
