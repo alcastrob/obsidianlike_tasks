@@ -38,19 +38,21 @@ export class Status {
 
     /** This port's own "En espera" convention (see CLAUDE.md's "Notas adicionales" section and
      * `STATUS_ICON_EMOJI`/`STATUS_ICON` in the two consuming repos, which render this symbol as
-     * ⏳). Type ON_HOLD, not a dedicated type of its own — semantically the same concept as
-     * Obsidian Tasks' own `Status.ON_HOLD` ('h'), just under the symbol this port already commits
-     * to. Goes to Done when toggled. */
+     * ⏳). Uses its own {@link StatusType.WAITING} rather than reusing upstream's
+     * {@link StatusType.ON_HOLD} — added alongside {@link Status.DELEGATED}'s own
+     * {@link StatusType.DELEGATED} for the same reason and for consistency between the two.
+     * Goes to Done when toggled. */
     public static readonly WAITING: Status = new Status(
-        new StatusConfiguration('w', 'Waiting', 'x', true, StatusType.ON_HOLD),
+        new StatusConfiguration('w', 'Waiting', 'x', true, StatusType.WAITING),
     );
 
     /** This port's own "Delegada" convention (rendered as 👤 — see `WAITING` above for the same
-     * reasoning). No dedicated StatusType fits "delegated to someone else" any better than TODO
-     * (it's still not personally done), so it uses that rather than adding a new enum value only
-     * this one status would use. Goes to Done when toggled. */
+     * reasoning). Uses its own {@link StatusType.DELEGATED} rather than reusing TODO — reusing
+     * TODO used to mean `status.type is TODO` (or `task.status.type === "TODO"` in a `filter by
+     * function`) silently matched delegated tasks too, which is rarely what "not started" is
+     * meant to select. Goes to Done when toggled. */
     public static readonly DELEGATED: Status = new Status(
-        new StatusConfiguration('d', 'Delegated', 'x', true, StatusType.TODO),
+        new StatusConfiguration('d', 'Delegated', 'x', true, StatusType.DELEGATED),
     );
 
     public readonly configuration: StatusConfiguration;
@@ -95,17 +97,23 @@ export class Status {
             case StatusType.ON_HOLD:
                 prefix = '3';
                 break;
-            case StatusType.DONE:
+            case StatusType.WAITING:
                 prefix = '4';
                 break;
-            case StatusType.CANCELLED:
+            case StatusType.DELEGATED:
                 prefix = '5';
                 break;
-            case StatusType.NON_TASK:
+            case StatusType.DONE:
                 prefix = '6';
                 break;
-            case StatusType.EMPTY:
+            case StatusType.CANCELLED:
                 prefix = '7';
+                break;
+            case StatusType.NON_TASK:
+                prefix = '8';
+                break;
+            case StatusType.EMPTY:
+                prefix = '9';
                 break;
         }
         return `%%${prefix}%%${type}`;

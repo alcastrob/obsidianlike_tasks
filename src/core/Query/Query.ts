@@ -339,9 +339,10 @@ export class TasksQuery {
     }
 
     /** `status.type is <TYPE>` / `status.type is not <TYPE>`, e.g. `status.type is IN_PROGRESS`.
-     * Note that `Waiting`/`Delegated` don't have a type of their own — they fall under ON_HOLD/
-     * TODO respectively (see {@link StatusRegistry.addDefaultStatusTypes}) — so selecting those
-     * two statuses specifically requires {@link parseStatusNameFilter} instead. */
+     * `Delegated` and `Waiting` each have their own {@link StatusType.DELEGATED}/
+     * {@link StatusType.WAITING} — this port's own additions, not part of upstream's
+     * {@link StatusType} — so `status.type is DELEGATED`/`status.type is WAITING` select them
+     * precisely, same as any other default status. */
     private parseStatusTypeFilter(line: string): FilterFn | null {
         const match = line.match(/^status\.type is (not )?(\w+)$/i);
         if (!match) {
@@ -353,9 +354,10 @@ export class TasksQuery {
     }
 
     /** `status.name includes <text>` / `status.name does not include <text>`, matching by the
-     * status's display name (e.g. "Delegated", "Waiting", "In Progress") rather than its type —
-     * the only way to select a status like Delegated or Waiting precisely, since neither has a
-     * distinct `status.type` of its own (see {@link parseStatusTypeFilter}). Mirrors upstream's
+     * status's display name (e.g. "Delegated", "Waiting", "In Progress") rather than its type.
+     * `status.type is DELEGATED`/`status.type is WAITING` (see {@link parseStatusTypeFilter}) now
+     * cover the same ground for the two default statuses that used to need this instead, but this
+     * filter is kept as the more explicit, name-based alternative. Mirrors upstream's
      * `StatusNameField`, which is likewise `includes`/`does not include` only, not `is`. */
     private parseStatusNameFilter(line: string): FilterFn | null {
         const includes = line.match(/^status\.name includes (.+)$/i);

@@ -9,6 +9,18 @@ export enum StatusType {
     CANCELLED = 'CANCELLED',
     NON_TASK = 'NON_TASK',
     EMPTY = 'EMPTY',
+    /** This port's own addition — not part of upstream Obsidian Tasks' {@link StatusType}. Gives
+     * {@link Status.DELEGATED} ('d') a type distinct from {@link StatusType.TODO}, so `filter by
+     * function task.status.type === "TODO"` (or `status.type is TODO`) doesn't silently match
+     * delegated tasks too. See {@link Status.DELEGATED} for the history — it used to reuse TODO
+     * on the theory that "delegated" was close enough to "not personally done", but that made
+     * `status.type is TODO` an unreliable way to mean "not started". */
+    DELEGATED = 'DELEGATED',
+    /** This port's own addition, for the same reason as {@link StatusType.DELEGATED} and added
+     * alongside it for consistency: gives {@link Status.WAITING} ('w') a type of its own instead
+     * of reusing upstream's {@link StatusType.ON_HOLD}, so `status.type is WAITING` reads as
+     * precisely what it selects instead of borrowing a same-ish-but-not-quite upstream concept. */
+    WAITING = 'WAITING',
 }
 
 /**

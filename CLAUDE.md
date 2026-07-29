@@ -104,14 +104,20 @@ la versión inicial. Verificado contra 6 queries reales de un vault de Obsidian 
 de prueba inventados) — ver `git log`/conversación para los ejemplos exactos.
 
 Filtros atómicos soportados: `not done`/`done`, `status.type is [not] <TYPE>` (TODO,
-IN_PROGRESS, DONE, CANCELLED, ON_HOLD, NON_TASK — de los seis statuses que este port registra por
-defecto, `Delegated` (`d`) cae bajo TODO y `Waiting` (`w`) bajo ON_HOLD, ver "Status" en
-`TaskEditWebview.ts` más abajo; cualquier otro status con nombre propio sigue sin UI de
-configuración, así que su `.type` será TODO a menos que se registre a mano), **`status.name
-includes/does not include <texto>`** (filtra por el nombre del status en sí — p. ej. `status.name
-includes Delegated` o `status.name includes Waiting` — la única forma de seleccionar esos dos
-statuses de forma precisa, ya que ninguno tiene un `.type` propio distintivo; mismo comportamiento
-que `StatusNameField` del original, que tampoco soporta `is`, solo `includes`/`does not
+IN_PROGRESS, DONE, CANCELLED, ON_HOLD, NON_TASK, y **`DELEGATED`**/**`WAITING`** — estos dos
+últimos no existen en el original, son `StatusType` propios de este port para que `Delegated`
+(`d`) y `Waiting` (`w`) tengan cada uno un tipo distinto (antes `Delegated` caía bajo TODO y
+`Waiting` bajo ON_HOLD); antes de este cambio, `status.type is TODO`/`task.status.type ===
+"TODO"` en un `filter by function` colaba también las tareas Delegated, lo cual sorprendía a
+quien esperaba solo tareas "sin empezar" — ver "Status" en `TaskEditWebview.ts` más abajo.
+`ON_HOLD` (el tipo del propio Obsidian Tasks) sigue existiendo pero ningún status de los seis por
+defecto lo usa ya — solo aplicaría a un status "On Hold" (`h`) verdaderamente personalizado, que
+no forma parte del conjunto por defecto de este port. Cualquier otro status con nombre propio
+sigue sin UI de configuración, así que su `.type` será TODO a menos que se registre a mano),
+**`status.name includes/does not include <texto>`** (filtra por el nombre del status en sí — p.
+ej. `status.name includes Delegated` — alternativa más explícita a `status.type is`, aunque ya no
+es la única forma de seleccionar Delegated/Waiting con precisión; mismo comportamiento que
+`StatusNameField` del original, que tampoco soporta `is`, solo `includes`/`does not
 include`/`regex matches`, de ahí que este puerto tampoco lo añada), `<due|scheduled|start|done|created|cancelled> before/after/on
 <fecha>` (acepta tanto `start` como `starts`, igual que Obsidian), `no/has <campo> date`,
 `happens before/after/on <fecha>` / `has/no happens date` (pseudo-campo que mira due, scheduled
@@ -366,11 +372,18 @@ registra por defecto los dos estados propios de este port (`Status.WAITING` `w` 
 `Status.DELEGATED` `d` "Delegated", en `StatusRegistry.addDefaultStatusTypes()`) — los mismos
 símbolos que `STATUS_ICON_EMOJI`/`STATUS_ICON` ya renderizaban como ⏳/👤 en ambos repos; antes de
 esto, esos dos símbolos se reconocían al mostrarlos pero no eran seleccionables desde este diálogo,
-solo alcanzables escribiendo `[w]`/`[d]` a mano en el markdown. `Status.WAITING` usa
-`StatusType.ON_HOLD` (mismo concepto que el "On Hold" del propio Obsidian Tasks, solo que bajo el
-símbolo que este port ya usaba); `Status.DELEGATED` usa `StatusType.TODO` a falta de un tipo propio
-mejor. Para registrar un status *verdaderamente* personalizado (no de este conjunto fijo) sigue
-haciendo falta el gotcha de `Config/Settings.ts` de la sección `core/Query/Query.ts` de más abajo.
+solo alcanzables escribiendo `[w]`/`[d]` a mano en el markdown. `Status.WAITING` y
+`Status.DELEGATED` usan cada uno su propio valor de enum, **`StatusType.WAITING`** y
+**`StatusType.DELEGATED`** — ninguno existe en el original — en vez de reusar tipos ya existentes
+(`ON_HOLD`/`TODO` respectivamente, como hacían al principio). El cambio vino de que `status.type
+is TODO`/`task.status.type === "TODO"` colaba también las tareas Delegated en resultados pensados
+para "sin empezar" — reusar TODO parecía razonable en un primer momento ("delegada" tampoco está
+personalmente hecha) pero rompía cualquier filtro que quisiera distinguir "de verdad sin tocar" de
+"delegada a otra persona"; `Status.WAITING` se migró de `ON_HOLD` a su propio `StatusType.WAITING`
+en el mismo cambio, por consistencia con `Delegated`, aunque en su caso no había ambigüedad
+práctica todavía (era el único status por defecto bajo `ON_HOLD`). Para registrar un status
+*verdaderamente* personalizado (no de este conjunto fijo) sigue haciendo falta el gotcha de
+`Config/Settings.ts` de la sección `core/Query/Query.ts` de más abajo.
 Al cambiar de estado, el webview manda `statusChanged` (símbolo elegido +
 el texto actual de Done/Cancelled) y el extension host responde `statusDatesUpdated` calculado
 contra una `baselineTask` fija (la tarea existente, o una TODO recién creada si se está creando una
