@@ -232,6 +232,13 @@ function setStatusRelatedDate(currentText: string, isInStatus: boolean, editedDa
     return currentText;
 }
 
+/** Keyed by `path#line`, tracks which task locations currently have a dialog open (or in the
+ * middle of opening) — see the guard at the top of {@link showTaskEditDialog}. */
+const openDialogLocations = new Set<string>();
+/** Companion to {@link openDialogLocations}: the actual panel, once created, so a duplicate
+ * invocation that arrives after the panel exists can be revealed instead of silently dropped. */
+const openDialogPanels = new Map<string, vscode.WebviewPanel>();
+
 /**
  * Shows a single-screen dialog for creating/editing a task, laid out to resemble Obsidian Tasks'
  * own "Create or edit Task" modal: description, priority grid, recurrence with live preview,
@@ -251,6 +258,34 @@ export async function showTaskEditDialog(
     seed: TaskFormSeed,
     isEditing: boolean,
     context: TaskFormContext,
+): Promise<TaskFormResult | undefined> {
+    // Guards against the "Edit" action firing twice in a row for the same task — a double click
+    // on the CodeLens, or a keyboard shortcut pressed again before the first dialog has finished
+    // opening — which used to spawn two independent WebviewPanels for the same line. Checked and
+    // reserved synchronously, before the first `await` below, so two calls landing in the same
+    // tick can't both see the location as free: JS runs each call's synchronous prefix to
+    // completion before yielding to the event loop, so the second call always observes the first
+    // call's reservation.
+    const locationKey = `${context.taskLocation.path}#${context.taskLocation.lineNumber}`;
+    if (openDialogLocations.has(locationKey)) {
+        openDialogPanels.get(locationKey)?.reveal(undefined, false);
+        return undefined;
+    }
+    openDialogLocations.add(locationKey);
+
+    try {
+        return await showTaskEditDialogUnguarded(seed, isEditing, context, locationKey);
+    } finally {
+        openDialogLocations.delete(locationKey);
+        openDialogPanels.delete(locationKey);
+    }
+}
+
+async function showTaskEditDialogUnguarded(
+    seed: TaskFormSeed,
+    isEditing: boolean,
+    context: TaskFormContext,
+    locationKey: string,
 ): Promise<TaskFormResult | undefined> {
     // Awaited before the panel/HTML is built so the `[[wikilink]]` suggester in the description
     // field has its candidate list from the very first paint, matching how `context.allTasks` is
@@ -279,6 +314,7 @@ export async function showTaskEditDialog(
             // open (a single short-lived panel, not something left running for a whole session).
             { enableScripts: true, retainContextWhenHidden: true },
         );
+        openDialogPanels.set(locationKey, panel);
 
         const baselineTask = context.existingTask ?? defaultBaselineTask(context.taskLocation);
         const byKey = new Map(context.allTasks.map((task) => [dependencyKey(task), task]));
@@ -577,7 +613,6 @@ function renderHtml(
         padding: 28px 32px;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     }
-    h1 { font-size: 1.4em; margin: 0 0 20px; }
     .field { margin-bottom: 18px; }
     .field > label.field-label { display: block; font-size: 0.95em; margin-bottom: 6px; opacity: 0.85; }
     textarea, input[type='text'], select {
@@ -735,7 +770,6 @@ function renderHtml(
 </head>
 <body>
 <div class="card">
-    <h1>${isEditing ? 'Edit Task' : 'Create Task'}</h1>
     <div id="error" class="error-banner"></div>
 
     <div class="field">

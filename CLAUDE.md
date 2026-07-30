@@ -350,6 +350,30 @@ volver, tanto si el usuario cancela como si aplica cambios. El otro punto de ent
 aplicar esta técnica — ese lado del arreglo (guardar/restaurar el `scrollTop` del propio webview
 CM6) vive en `c:\git\obsidianlike`, ver la sección `panelScrollTop` de su `CLAUDE.md`.
 
+**El diálogo se abría dos veces al disparar "Editar tarea" dos veces seguidas para la misma
+tarea**: cada llamada a `showTaskEditDialog` creaba un `WebviewPanel` nuevo sin comprobar si ya
+había uno abierto para esa misma línea — un doble clic sobre el CodeLens "Edit", o pulsar
+`Shift+Alt+E` (Obsidian-like) una segunda vez mientras el primer diálogo aún estaba abriéndose
+(la llamada a `findAllNoteNames()` antes de crear el panel tarda lo suyo en un vault grande), abría
+dos pestañas de diálogo apiladas para la misma tarea. Arreglado con un guard keyed por
+`path#lineNumber`: `openDialogLocations` (un `Set<string>`) reserva la ubicación de forma
+**síncrona**, antes del primer `await` de la función — JS ejecuta el tramo síncrono de cada llamada
+hasta el primer `await` sin interrupciones, así que una segunda llamada que llega en el mismo tick
+siempre ve ya reservada la ubicación por la primera, cerrando también la ventana de carrera durante
+el escaneo de `findAllNoteNames()`, no solo tras crear el panel. `openDialogPanels` (un
+`Map<string, vscode.WebviewPanel>`) guarda el panel real una vez creado; una segunda invocación que
+llega después de que el panel ya exista lo trae al frente (`panel.reveal(...)`) en vez de no hacer
+nada. Ambos se limpian en un `finally` alrededor de la lógica real (movida a
+`showTaskEditDialogUnguarded`), pase lo que pase con el diálogo (Apply, Cancel, o cerrar la pestaña
+a mano).
+
+**Sin `<h1>` propio dentro de la card**: la pestaña del `WebviewPanel` ya lleva por título "Create
+Task"/"Edit Task" (el segundo argumento de `vscode.window.createWebviewPanel`), así que repetirlo
+como encabezado justo encima de "Description" era redundante y solo restaba alto útil a una card ya
+apretada — visible especialmente en pantallas más pequeñas, donde el diálogo entero no cabe sin
+scroll. Eliminado el `<h1>` y su regla CSS; la card ahora empieza directamente en el banner de error
+(oculto por defecto) seguido de la descripción.
+
 Cubre el mismo conjunto de campos que el modal Svelte original: descripción, prioridad,
 recurrencia, due/scheduled/start, **Before this**/**After this** (dependencias), **Status**
 (desplegable de estados registrados) y **Created**/**Done**/**Cancelled**. La única pieza que
