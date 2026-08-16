@@ -1,7 +1,27 @@
 .vscode/**
 .vscode-test/**
 src/**
-out/test/**
+out/**
+esbuild.js
 .gitignore
 tsconfig.json
 .eslintrc.json
+
+# Reference-only copy of the upstream Obsidian Tasks plugin (see CLAUDE.md) — never
+# compiled or shipped, just kept around for inspiration. ~2150 files on its own.
+obsidian-tasks-code/**
+
+# Internal project notes, not needed by the packaged extension.
+.claude/**
+CLAUDE.md
+
+# dist/extension.js (built by `node esbuild.js --production`, see esbuild.js) bundles
+# moment/rrule/chrono-node in directly, so node_modules/** is no longer needed at
+# runtime and can be excluded wholesale — unlike before this file existed, when those
+# three were real runtime deps loaded via require() and had to ship as loose files.
+node_modules/**
+
+# Belt-and-suspenders: --production builds don't emit dist/extension.js.map, but esbuild
+# never deletes a stale one left over from a previous dev build (see esbuild.js) — this
+# line keeps a leftover sourcemap out of the .vsix even if dist/ wasn't clean.
+dist/**/*.map

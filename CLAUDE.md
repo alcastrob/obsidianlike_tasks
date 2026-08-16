@@ -25,17 +25,24 @@ Extensión de VS Code llamada **"Obsidian-like Tasks"** que permite crear, compl
 
 - TypeScript (`^5.4.0`), compilado a CommonJS ES2020
 - VS Code Extension API (`^1.85.0`)
-- `moment` / `rrule` / `chrono-node` — motor de fechas y recurrencia (dependencias reales en
-  tiempo de ejecución; ver el gotcha de `.vscodeignore` más abajo)
+- `moment` / `rrule` / `chrono-node` — motor de fechas y recurrencia. Dependencias npm reales
+  (`dependencies`, no `devDependencies`) usadas en tiempo de ejecución, pero **empaquetadas**
+  (bundleadas) dentro de `dist/extension.js` por `esbuild` — no viajan como `node_modules/`
+  sueltos dentro del `.vsix`; ver "Bundling con esbuild" más abajo.
+- `esbuild` (`^0.28`) — bundlea `src/extension.ts` (+ `moment`/`rrule`/`chrono-node`) en un único
+  `dist/extension.js`; ver `esbuild.js` y "Bundling con esbuild" más abajo
 - `@vscode/vsce` (`^3.0.0`) — para empaquetar en `.vsix`
 
 ### Estructura de archivos
 
 ```
 obsidianlike_tasks/            ← raíz del repo == raíz de la extensión
-├── package.json              ← manifest (comandos, configuración)
+├── package.json              ← manifest (comandos, configuración); "main" apunta a dist/extension.js
 ├── README.md                 ← documentación de cara al usuario (qué hace, comandos, instalación)
-├── tsconfig.json             ← CommonJS, ES2020, outDir=out, rootDir=src, esModuleInterop
+├── tsconfig.json             ← CommonJS, ES2020, rootDir=src, esModuleInterop, noEmit=true (solo
+│                                type-checking; el JS lo genera esbuild, no tsc — ver abajo)
+├── esbuild.js                 ← bundlea src/extension.ts → dist/extension.js (ver "Bundling con
+│                                esbuild" más abajo)
 ├── .vscodeignore
 ├── src/
 │   ├── extension.ts              ← activate()/deactivate(); activate() es async (espera al
@@ -51,7 +58,7 @@ obsidianlike_tasks/            ← raíz del repo == raíz de la extensión
 │   ├── TaskEditWebview.ts        ← diálogo "Create or edit Task" (WebviewPanel), estilo Obsidian
 │   ├── api/TasksApi.ts           ← API pública exportada (consumida por Obsidian-like)
 │   └── core/                     ← port fiel del motor de Obsidian Tasks (ver abajo)
-├── out/                      ← JS compilado (generado, no commitear)
+├── dist/                     ← bundle generado por esbuild (dist/extension.js, no commitear)
 └── obsidian-tasks-code/      ← plugin original de Obsidian, solo como referencia — no se compila
                                  (tsconfig.json tiene `"include": ["src/**/*"]` precisamente para
                                  que tsc no intente compilar esto, ahora que es hermano de `src/`)
@@ -651,10 +658,21 @@ submódulo/worktree con este):
 ### Scripts npm
 
 ```bash
-npm run compile   # tsc -p ./   → genera out/
-npm run watch     # tsc en modo watch
-npm run package   # compile + vsce package --allow-missing-repository → genera .vsix
+npm run check-types  # tsc -p ./ (noEmit) → solo type-checking, no genera JS
+npm run compile      # check-types + esbuild (dev: sourcemaps, sin minificar) → genera dist/extension.js
+npm run watch        # esbuild en modo watch (sin type-checking en vivo; correr check-types aparte si hace falta)
+npm run package       # check-types + esbuild --production (minificado, sin sourcemaps) + vsce package --allow-missing-repository → genera .vsix
 ```
+
+`vscode:prepublish` (que `vsce package`/`vsce publish` invocan automáticamente, con o sin llamarlo
+tú) hace su propio `check-types && node esbuild.js --production` — **no** llama a `npm run
+package`, aposta: `package` ya termina en `vsce package`, así que si `vscode:prepublish` llamara a
+`npm run package` se entraría en una recursión infinita (`package` → `vsce package` → dispara
+`vscode:prepublish` → `npm run package` → ...) que solo para al reventar por algún motivo externo
+(en la máquina donde se descubrió, un `npm` no encontrado en el `PATH` de un subproceso anidado,
+tras un buen rato de `ERROR npm failed with exit code 1` repetidos). Cualquier cambio futuro a
+estos scripts debe mantener esa asimetría: `vscode:prepublish` construye, `package` construye **y
+empaqueta**, nunca al revés.
 
 ### Setup en máquina nueva
 
@@ -668,7 +686,10 @@ npm install --strict-ssl=false
 npm run compile
 ```
 
-Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extension Development Host).
+Para depurar: abrir la raíz del repo en VS Code, correr `npm run watch` en una terminal (deja
+`dist/extension.js` actualizado en cada guardado) y pulsar **F5** (lanza Extension Development
+Host). No hay `.vscode/launch.json` propio — F5 usa la configuración de depuración de extensiones
+que VS Code genera automáticamente a partir de `package.json`.
 
 ### Gotchas conocidos
 
@@ -681,14 +702,16 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
   los `.ts` de `obsidian-tasks-code/`, que chocan con `rootDir: "src"` (`error TS6059: File ...
   is not under 'rootDir'`). El síntoma es una pared de docenas de errores TS6059 apuntando a
   ficheros de `obsidian-tasks-code/tests|src/...` que nunca deberían compilarse.
-- **`.vscodeignore` no debe excluir `node_modules/**`**: `vsce package` ya sabe incluir solo las
-  `dependencies` reales (excluyendo `devDependencies` como `typescript`) — si además hay una
-  línea `node_modules/**` en `.vscodeignore`, la pisa y las excluye TODAS, incluidas `moment`/
-  `rrule`/`chrono-node`, que sí se usan en tiempo de ejecución. Sin esas dependencias en el
-  `.vsix`, `activate()` lanza `Cannot find module 'moment'` **antes de registrar ningún
-  comando** — síntoma: cualquier comando de la extensión da "command not found", sin pista
-  aparente de por qué. Diagnosticado leyendo `%APPDATA%\Code\logs\<sesión>\window*\exthost\exthost.log`
-  (o el del perfil correspondiente) en busca de `Activating extension ... failed`.
+- **Nota histórica — `.vscodeignore` y `node_modules/**` (superada por el bundling de abajo)**:
+  antes de que existiera `esbuild.js`, `moment`/`rrule`/`chrono-node` se cargaban vía `require()`
+  en tiempo de ejecución desde `node_modules/` suelto dentro del `.vsix` — `vsce package` incluía
+  solo las `dependencies` reales (excluyendo `devDependencies` como `typescript`), así que poner
+  `node_modules/**` en `.vscodeignore` las excluía TODAS y `activate()` lanzaba `Cannot find
+  module 'moment'` antes de registrar ningún comando. Ahora que `dist/extension.js` bundlea esos
+  tres paquetes, `.vscodeignore` sí excluye `node_modules/**` a propósito (nada de lo que hay ahí
+  se necesita en el `.vsix`) — ver "Bundling con esbuild" más abajo. Si algún día se saca un
+  paquete pesado del bundle (`external` en `esbuild.js`) sin currarse el motivo original, este es
+  el fallo al que hay que volver a prestar atención.
 - **`activeTextEditor`/`editorLangId`/`editorTextFocus` no existen para editores personalizados**:
   si otra extensión (p. ej. Obsidian-like) abre `.md` con un `CustomTextEditorProvider`, VS Code no
   lo expone como `TextEditor` ni activa esos context keys. Cualquier comando o `menus.commandPalette`
@@ -708,6 +731,54 @@ Para depurar: abrir la raíz del repo en VS Code y pulsar **F5** (lanza Extensio
   calcularlo con un getter en el momento del spread. Diagnosticado con un `OutputChannel` real
   (no `console.log`, que no se ve en una extensión instalada normalmente) rastreando el punto
   exacto donde el evento se disparaba pero el suscriptor no se enteraba.
+
+### Bundling con esbuild
+
+**Reportado como**: `vsce package` avisaba `This extension consists of 4625 files, out of which
+1504 are JavaScript files. For performance reasons, you should bundle your extension...`. Dos
+causas, una encima de otra:
+
+1. `obsidian-tasks-code/` (2154 ficheros, la carpeta de referencia del plugin original, nunca
+   compilada ni usada en runtime — ver "Qué es este repositorio" arriba) se estaba empaquetando
+   entera porque `.vscodeignore` nunca la excluía. Solo esto ya explicaba casi la mitad del
+   recuento. Arreglado sin bundling, con una línea `obsidian-tasks-code/**` en `.vscodeignore` —
+   sigue ahí, es un fix independiente y válido aunque nunca hubiera hecho falta bundlear.
+2. `moment`/`rrule`/`chrono-node` sueltos en `node_modules/` aportaban ~2400 ficheros más:
+   `chrono-node` en concreto ships tanto un build CJS como uno ESM completos (`dist/cjs/` +
+   `dist/esm/`, 682 ficheros cada uno) más `src/`/`test/` (TypeScript sin compilar y sus tests) —
+   nada de eso hace falta para `require('chrono-node')` en Node, que solo resuelve `dist/cjs/`.
+   `moment` aparte ships ~140 ficheros de locale (`locale/`, `dist/locale/`) que este proyecto
+   nunca usa (`moment.locale(...)` no se llama en ningún sitio, verificado con grep — el código
+   solo usa el locale por defecto, inglés, embebido en `moment.js`). Recortando esos subdirectorios
+   concretos en `.vscodeignore` (sin tocar `node_modules/**` en general, por el motivo del gotcha
+   histórico de arriba) el recuento bajó a 326 ficheros / 266 JS — pero **`vsce` sigue avisando
+   por encima de 100 ficheros JS** (`files.length > 5000 || jsFiles.length > 100`, en
+   `@vscode/vsce/out/package.js`), y `chrono-node/dist/cjs/` por sí solo ya tiene 227 (uno por
+   idioma — su propio `index.js` los `require()` todos de forma incondicional, así que no se
+   pueden recortar más sin romperlo). Sin bundling no hay forma de bajar de 100.
+
+**Arreglo real**: `esbuild.js` bundlea `src/extension.ts` — con todo su grafo de imports,
+incluidos `moment`/`rrule`/`chrono-node` — en un único `dist/extension.js` (`bundle: true, format:
+'cjs', platform: 'node', external: ['vscode']`; `vscode` se deja fuera porque lo provee el
+Extension Host en tiempo de ejecución, no es algo que se pueda ni deba bundlear). Con esto:
+- `node_modules/**` entero se puede excluir de `.vscodeignore` sin más (nada de ahí se necesita
+  ya en el `.vsix`) — reemplaza todas las líneas de recorte fino del punto 2, que ya no hacen
+  falta.
+- `package.json`'s `main` pasa de `./out/extension.js` a `./dist/extension.js`.
+- `tsconfig.json` gana `"noEmit": true` y pierde `outDir`/`sourceMap` — `tsc` ahora solo hace
+  type-checking (`check-types`), el JS lo genera esbuild (que además minifica y quita sourcemaps
+  en `--production`, y no type-checkea nada por sí mismo — de ahí que `compile`/`package` sigan
+  corriendo `check-types` antes).
+- `out/` desaparece del todo (carpeta y referencias); `dist/` ocupa su lugar como artefacto
+  generado, en `.gitignore`.
+
+Resultado final: **8 ficheros, 103.92 KB** en el `.vsix`, sin ningún warning. Verificado
+recompilando (`npm run check-types`, sin errores), empaquetando (`npm run package`, sin
+`WARNING` en la salida) y cargando el bundle fuera de VS Code
+(`node -e "require('./dist/extension.js')"`, que falla únicamente en `Cannot find module
+'vscode'` — la única dependencia que de verdad no está ahí a propósito — confirmando que el resto
+del grafo, incluidos los tres paquetes bundleados, resuelve y se ejecuta sin errores de sintaxis
+ni módulos faltantes).
 
 ### Próximos pasos posibles
 
