@@ -1,3 +1,4 @@
+import { computeFencedLines } from './codeFences';
 import * as vscode from 'vscode';
 import { Task } from './core/Task/Task';
 import { TaskLocation } from './core/Task/TaskLocation';
@@ -17,8 +18,14 @@ export class TaskCodeLensProvider implements vscode.CodeLensProvider {
         const path = vscode.workspace.asRelativePath(document.uri, false);
         const lenses: vscode.CodeLens[] = [];
 
+        const allLines = Array.from({ length: document.lineCount }, (_, i) => document.lineAt(i).text);
+        const fenced = computeFencedLines(allLines);
+
         for (let line = 0; line < document.lineCount; line++) {
-            const lineText = document.lineAt(line).text;
+            if (fenced[line]) {
+                continue;
+            }
+            const lineText = allLines[line];
             const task = Task.fromLine({ line: lineText, taskLocation: new TaskLocation(path, line) });
             if (task === null) {
                 continue;

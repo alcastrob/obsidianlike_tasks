@@ -1,3 +1,4 @@
+import { computeFencedLines } from './codeFences';
 import * as vscode from 'vscode';
 import moment from 'moment';
 import { Task } from './core/Task/Task';
@@ -71,8 +72,14 @@ export class TaskDecorations implements vscode.Disposable {
         const doneRanges: vscode.Range[] = [];
         const overdueRanges: vscode.Range[] = [];
 
+        const allLines = Array.from({ length: editor.document.lineCount }, (_, i) => editor.document.lineAt(i).text);
+        const fenced = computeFencedLines(allLines);
+
         for (let line = 0; line < editor.document.lineCount; line++) {
-            const lineText = editor.document.lineAt(line).text;
+            if (fenced[line]) {
+                continue;
+            }
+            const lineText = allLines[line];
             const task = Task.fromLine({ line: lineText, taskLocation: new TaskLocation(path, line) });
             if (task === null) {
                 continue;

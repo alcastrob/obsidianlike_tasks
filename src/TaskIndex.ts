@@ -1,3 +1,4 @@
+import { computeFencedLines } from './codeFences';
 import * as vscode from 'vscode';
 import { Task } from './core/Task/Task';
 import { TaskLocation } from './core/Task/TaskLocation';
@@ -103,7 +104,12 @@ export class TaskIndex implements vscode.Disposable {
         let sectionStart = 0;
         let sectionIndex = 0;
 
+        const fenced = computeFencedLines(lines);
+
         lines.forEach((line, lineNumber) => {
+            if (fenced[lineNumber]) {
+                return;
+            }
             const headingMatch = line.match(/^#{1,6} +(.*)$/);
             if (headingMatch) {
                 precedingHeader = headingMatch[1].trim();
