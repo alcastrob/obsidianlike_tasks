@@ -12,7 +12,8 @@ export function computeFencedLines(lines: readonly string[]): boolean[] {
     let fenceLen = 0;
 
     for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(/^\s*(`{3,}|~{3,})(.*)$/);
+        // [^\r\n]* rather than .* : with CRLF line endings the line ends in '\r', which '.' won't match.
+        const match = lines[i].match(/^[\s>]*(`{3,}|~{3,})([^\r\n]*)\r?$/);
 
         if (fenceChar === null) {
             // A backtick fence's info string can't contain backticks (else it's inline code).
